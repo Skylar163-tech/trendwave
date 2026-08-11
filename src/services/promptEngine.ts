@@ -54,6 +54,12 @@ function productVars(p: CatalogProduct): Record<string, string> {
       p.originalPrice != null ? String(p.originalPrice) : '',
     product_selling_points: p.sellingPoints.join('、'),
     product_category: p.category,
+    product_monthly_sales:
+      p.monthlySales != null ? String(p.monthlySales) : '',
+    product_return_rate:
+      p.returnRate != null ? `${(p.returnRate * 100).toFixed(1)}%` : '',
+    product_gross_margin:
+      p.grossMargin != null ? `${(p.grossMargin * 100).toFixed(1)}%` : '',
   }
 }
 

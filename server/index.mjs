@@ -141,16 +141,54 @@ async function handleLlmProxy(req, res) {
   }
 }
 
-function stripHtml(s) {
+function unwrapCdata(s) {
+  return String(s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, '$1')
+}
+
+function decodeEntities(s) {
   return String(s || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+}
+
+function stripHtml(s) {
+  return decodeEntities(unwrapCdata(s))
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
 
+function looksLikeHtml(text) {
+  const head = String(text || '')
+    .slice(0, 400)
+    .trim()
+    .toLowerCase()
+  return (
+    head.startsWith('<!doctype html') ||
+    head.startsWith('<html') ||
+    (head.includes('<head') && head.includes('<body'))
+  )
+}
+
+function feedHint(url) {
+  if (/36kr\.com\/newsflashes/i.test(url)) {
+    return '建议改用 https://www.36kr.com/feed'
+  }
+  if (/zhihu\.com\/rss/i.test(url)) {
+    return '知乎官方 RSS 常返回空内容，请换其他公开订阅源'
+  }
+  return ''
+}
+
 function parseRss(xml, sourceName) {
   const items = []
-  const blocks = xml.match(/<item[\s\S]*?<\/item>/gi) || xml.match(/<entry[\s\S]*?<\/entry>/gi) || []
+  const blocks =
+    xml.match(/<item[\s\S]*?<\/item>/gi) ||
+    xml.match(/<entry[\s\S]*?<\/entry>/gi) ||
+    []
   for (const block of blocks.slice(0, 20)) {
     const title = stripHtml(
       (block.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '',
@@ -158,24 +196,105 @@ function parseRss(xml, sourceName) {
     const desc = stripHtml(
       (block.match(/<description[^>]*>([\s\S]*?)<\/description>/i) ||
         block.match(/<summary[^>]*>([\s\S]*?)<\/summary>/i) ||
+        block.match(/<content[^>]*>([\s\S]*?)<\/content>/i) ||
         [])[1] || title,
     )
-    const pub =
+    const pub = stripHtml(
       (block.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i) ||
         block.match(/<updated[^>]*>([\s\S]*?)<\/updated>/i) ||
-        [])[1] || ''
+        block.match(/<published[^>]*>([\s\S]*?)<\/published>/i) ||
+        [])[1] || '',
+    )
     if (!title) continue
     items.push({
       title,
       summary: desc.slice(0, 160),
       source: sourceName || 'RSS',
-      publishedAt: pub.trim(),
+      publishedAt: pub,
       category: '资讯',
       heat: 600 - items.length * 8,
       tags: ['资讯'],
     })
   }
   return items
+}
+
+const HOTBOARD = {
+  toutiao: {
+    name: '今日头条',
+    url: 'https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc',
+  },
+}
+
+function parseToutiaoHotBoard(payload) {
+  const rows = Array.isArray(payload?.data) ? payload.data : []
+  const items = []
+  for (const row of rows.slice(0, 20)) {
+    const title = String(row?.Title || '').trim()
+    if (!title) continue
+    const hotRaw = Number(row?.HotValue) || 0
+    const heat = Math.max(1, Math.min(9999, Math.round(hotRaw / 10000) || 900 - items.length * 10))
+    const label = String(row?.Label || '').trim()
+    items.push({
+      title,
+      summary: label ? `${title}（${label}）` : title,
+      source: '今日头条',
+      publishedAt: new Date().toISOString(),
+      category: '热榜',
+      heat,
+      tags: label ? ['热榜', label] : ['热榜'],
+      url: String(row?.Url || ''),
+    })
+  }
+  return items
+}
+
+async function handleHotBoard(platform, res) {
+  const conf = HOTBOARD[platform]
+  if (!conf) {
+    send(res, 400, {
+      error: '暂不支持该热榜平台',
+      detail: `可选：${Object.keys(HOTBOARD).join(', ')}`,
+    })
+    return
+  }
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 12000)
+    const upstream = await fetch(conf.url, {
+      signal: ctrl.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        Referer: 'https://www.toutiao.com/',
+      },
+    })
+    clearTimeout(timer)
+    const text = await upstream.text()
+    if (!upstream.ok) {
+      send(res, upstream.status, { error: `上游 HTTP ${upstream.status}` })
+      return
+    }
+    let payload
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      send(res, 422, { error: '热榜返回无法解析为 JSON', items: [] })
+      return
+    }
+    const items = platform === 'toutiao' ? parseToutiaoHotBoard(payload) : []
+    if (!items.length) {
+      send(res, 422, { error: `${conf.name}热榜暂无条目`, items: [] })
+      return
+    }
+    send(res, 200, { items, platform })
+  } catch (e) {
+    const msg = String(e)
+    if (/abort/i.test(msg)) send(res, 504, { error: '请求超时' })
+    else send(res, 502, { error: '拉取热榜失败', detail: msg })
+  }
 }
 
 async function handleSourceFetch(url, res) {
@@ -189,15 +308,49 @@ async function handleSourceFetch(url, res) {
     const timer = setTimeout(() => ctrl.abort(), 12000)
     const upstream = await fetch(u.toString(), {
       signal: ctrl.signal,
-      headers: { 'User-Agent': 'TrendWave/1.0' },
+      redirect: 'follow',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        Accept:
+          'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      },
     })
     clearTimeout(timer)
     const text = await upstream.text()
     if (!upstream.ok) {
-      send(res, upstream.status, { error: `上游 HTTP ${upstream.status}` })
+      const hint = feedHint(url)
+      send(res, upstream.status, {
+        error: `上游 HTTP ${upstream.status}${hint ? `。${hint}` : ''}`,
+      })
+      return
+    }
+    if (!text.trim()) {
+      const hint = feedHint(url)
+      send(res, 422, {
+        error: `订阅源返回空内容${hint ? `。${hint}` : ''}`,
+        items: [],
+      })
+      return
+    }
+    if (looksLikeHtml(text)) {
+      const hint = feedHint(url)
+      send(res, 422, {
+        error: `地址返回的是网页而非 RSS/Atom${hint ? `。${hint}` : '，请确认 feed 地址'}`,
+        items: [],
+      })
       return
     }
     const items = parseRss(text, u.hostname)
+    if (!items.length) {
+      const hint = feedHint(url)
+      send(res, 422, {
+        error: `未能解析出条目${hint ? `。${hint}` : '，请确认是有效的 RSS/Atom'}`,
+        items: [],
+      })
+      return
+    }
     send(res, 200, { items })
   } catch (e) {
     const msg = String(e)
@@ -233,6 +386,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/sources/fetch') {
       const target = url.searchParams.get('url') || ''
       await handleSourceFetch(target, res)
+      return
+    }
+    if (req.method === 'GET' && url.pathname === '/api/sources/hotboard') {
+      const platform = (url.searchParams.get('platform') || '').trim()
+      await handleHotBoard(platform, res)
       return
     }
     send(res, 404, { error: 'not_found' })

@@ -102,7 +102,7 @@ export function NewsFetchStep() {
         </div>
       )}
 
-      <div className="grid gap-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {newsList.map((news) => (
           <NewsCard
             key={news.id}

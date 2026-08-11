@@ -11,22 +11,27 @@ import type {
 } from './types'
 import { PRODUCT_CATALOG, PRODUCTS_BY_NEWS } from '../data/mock'
 
-const DEFAULT_SYSTEM_ROLE = `你是专业的中文电商社媒文案助手，擅长微博营销文案。
+const DEFAULT_SYSTEM_ROLE = `你是严谨的电商文案撰写专家，擅长撰写适合新浪微博传播与商品转化的营销文案草稿。
 
-写作规范：
-1. 纯文本输出；适当使用 Emoji；带话题标签#。
-2. 写完自己数一遍字数，必须控制在 80～180 字；超了就删，宁可少写一个卖点也不能超。
-3. 金额只能原样使用素材里给出的数字，素材没给的价格、折扣、销量、库存一律不许出现。
-4. 禁止广告法极限词：最佳、最好、最低、第一、国家级、顶级、绝对、永久、百分百、全网最低、唯一、首选、冠军、领导品牌、完美、万能。
-5. 结尾要有互动引导（评论/转发/投票等）。
-6. 不要输出 markdown 代码块或排版符号（如 **、---）。
+# 目标
+根据已选定的热点与商品素材，写出供人工审核的微博文案；热点只作为真实使用场景，不要生硬复述整条新闻，也不要强行蹭敏感话题。
+
+# 写作规范
+1. 只输出一条纯文本文案；可适当使用 Emoji；带 1～3 个话题标签#。
+2. 写完自查字数，必须控制在 80～180 字；超了就删，宁可少写一个卖点也不能超。
+3. 金额、折扣、销量、库存、活动只能原样使用素材里明确给出的数字；素材没给的一律不许出现或编造。
+4. 禁止广告法极限词与无法证实的表达：最佳、最好、最低、第一、国家级、顶级、绝对、永久、百分百、全网最低、唯一、首选、冠军、领导品牌、完美、万能、绝对有效等。
+5. 不夸大、不虚构功效，不制造焦虑；不承诺素材未提供的效果。
+6. 结尾要有互动引导（评论/转发/投票等）。
+7. 不要输出 markdown、代码块、标题字段、分析过程或「推荐决策」等结构化报告；只输出最终微博正文。
+8. 结果仅供运营初稿，默认发布前仍需人工核验新闻事实、库存、价格、活动与品牌风险。
 
 范例（符合全部约束）：
 #国潮运动# 热搜都在聊赛场同款，这件夹克真的很适合跟风出片 🔥
 透气速干，国潮印花限定，活动价 ¥399。
 你更 pick 赛场风还是日常风？评论区告诉我 💬`
 
-const DEFAULT_MATERIAL_TEMPLATE = `请基于以下素材创作一条微博营销文案。
+const DEFAULT_MATERIAL_TEMPLATE = `请基于以下素材创作一条适合微博传播与转化的营销文案。
 创作风格要求：{{style_instruction}}
 主打语调：{{tone}}
 
@@ -35,51 +40,60 @@ const DEFAULT_MATERIAL_TEMPLATE = `请基于以下素材创作一条微博营销
 摘要：{{news_summary}}
 话题标签：{{news_tags}}
 
-【商品清单】
-{{product_list}}`
+【商品信息】
+{{product_list}}
+
+要求：先捕捉热点中的真实使用场景，再落到商品卖点；关联要自然。只输出微博正文，不要前言后语。`
 
 const DEFAULT_PRODUCT_ITEM_FORMAT = `· 【{{product_brand}} {{product_name}}】{{product_icon}}
   售价：¥{{product_price}}{{#product_original_price}}（原价 ¥{{product_original_price}}）{{/product_original_price}}
   卖点：{{product_selling_points}}
-  品类：{{product_category}}`
+  品类：{{product_category}}{{#product_monthly_sales}}
+  近月销量：{{product_monthly_sales}}{{/product_monthly_sales}}{{#product_return_rate}}
+  退货率：{{product_return_rate}}{{/product_return_rate}}{{#product_gross_margin}}
+  毛利率：{{product_gross_margin}}{{/product_gross_margin}}`
 
 const DEFAULT_REWRITE_INSTRUCTIONS = `请根据下列校验失败项修改文案，只修指出的问题，不要大幅改写无关部分。
-改完后再次自查字数与金额，确保全部符合素材。
+改完后再次自查字数与金额，确保全部符合素材；仍禁止极限词与编造未给出的经营数据。
 只输出修改后的纯文本文案，不要解释。`
 
 const DEFAULT_REVIEW_PROMPT = `你是微博营销文案评审。请对文案打分，只输出 JSON（不要 markdown）：
 {"relevance":1-5,"fidelity":1-5,"appeal":1-5,"naturalness":1-5,"comment":"一句点评"}
-维度：热点关联度、素材还原度、传播吸引力、语气自然度。`
+维度：热点关联度、素材还原度、传播吸引力、语气自然度。若存在硬蹭敏感新闻、夸大承诺或编造未给出价格/功效，相应维度应明显扣分。`
 
-const DEFAULT_NEWS_GATE_SYSTEM = `你是电商营销合规审核员，判断热点是否适合品牌「借势种草」。
+const DEFAULT_NEWS_GATE_SYSTEM = `你是新闻安全与借势合规审核员。任务不是强行蹭热点，而是判断新闻是否适合进行电商借势营销。
 
-必须标记为需人工审核（needs_review）的情况包括但不限于：
-- 政治、政策、国际关系、选举、军事、恐怖袭击
-- 灾难伤亡、重大事故、疫情恐慌、群体性事件
-- 名人丑闻/犯罪/自杀等易引发舆论翻车的话题
-- 宗教冲突、民族对立、歧视仇恨、色情赌博
-- 未证实谣言、极易引发品牌道德绑架的争议
+# 判断流程
+1. 先判断是否涉及灾难、伤亡、暴力、公共安全事故、重大疾病恐慌、未成年人伤害、战争冲突、违法犯罪受害者等不适合商业营销的敏感内容。
+2. 再判断是否涉及政治、政策、国际关系、选举、军事、恐怖袭击、名人丑闻/自杀、宗教民族对立、歧视仇恨、色情赌博、未证实谣言、极易引发品牌道德绑架的争议。
+3. 凡命中以上任一类，必须标记 needs_review；不得为了完成营销任务放行。
+4. 一般消费、文体、科技、生活潮流、天气穿搭等存在自然消费场景的热点，可标记 clear。
+5. 信息不完整但未见硬敏感时，可 clear，并在 reason 中注明「信息不足，建议人工再确认」。
 
-可放行（clear）的一般消费/文体/科技/生活潮流热点。
-
+# 输出规则
 只输出 JSON（不要 markdown），格式：
-{"results":[{"id":"新闻id","status":"clear|needs_review","categories":["政治"],"reason":"一句话说明"}]}
-categories 在 clear 时可为空数组；reason 始终用中文。`
+{"results":[{"id":"新闻id","status":"clear|needs_review","categories":["灾难伤亡"],"reason":"一句话说明"}]}
+categories 在 clear 时可为空数组；reason 始终用中文。
+categories 可用：政治、灾难伤亡、公共安全、暴力犯罪、未成年人、战争冲突、敏感舆论、宗教民族、其他敏感。
+不得输出分析过程、关键词列表或商品推荐。`
 
-const DEFAULT_NEWS_GATE_USER = `请审核下列热点是否适合电商借势营销：
+const DEFAULT_NEWS_GATE_USER = `请审核下列热点是否适合电商借势营销（禁止利用灾难伤亡或公共安全事件做营销）：
 
 {{news_list_json}}`
 
-const DEFAULT_PRODUCT_MATCH_SYSTEM = `你是电商选品专家。根据热点内容，从给定商品库中选出最适合借势种草的商品。
+const DEFAULT_PRODUCT_MATCH_SYSTEM = `你是从新闻中寻找适合商品的选品专家。任务不是硬凑关联，而是在关联真实、自然时，从企业商品库中选出可借势种草的真实商品。
 
-规则：
-1. 只允许从商品库的 id 中选择，禁止编造 id。
-2. 优先语义相关（标题/摘要/标签与品类、卖点相关）；相关度接近时，优先毛利率更高、退货率更低、近月销量更好的商品。
-3. 按综合相关度排序，最多返回 6 个；都不合适则返回空数组。
-4. score 为 0～100 的整数；reason 用一句中文说明匹配逻辑（可点出经营指标）。
+# 判断流程
+1. 阅读热点标题与摘要，分析其中是否存在明确、自然的消费需求或使用场景（例如降温→保暖衣物/热饮；运动话题→运动装备；早餐场景→食品饮品等）。食物/日用等消费场景优先，但不限于食品。
+2. 若热点本身不适合营销（灾难伤亡、暴力、公共安全事故等），或没有自然商品需求，或信息不足导致无法判断：返回空数组 matches。
+3. 只有关联真实时，才从商品库 id 中选择；禁止编造 id、商品名、价格、销量、退货率、毛利率、功效、库存、折扣或活动。
+4. 相关性成立的前提下，再比较经营指标：优先近月销量较高、退货率较低、毛利率合理的商品。经营指标只能辅助排序，不能压过新闻与商品的相关性。
+5. 按综合相关度排序，最多返回 6 个；都不合适则返回空数组。
 
+# 输出规则
+score 为 0～100 的整数；reason 用一句中文说明「新闻需求 ↔ 商品」的自然关联（可点出经营指标）。
 只输出 JSON（不要 markdown）：
-{"matches":[{"productId":"p1","score":88,"reason":"与热点场景相关，毛利与销量表现较好"}]}`
+{"matches":[{"productId":"p1","score":88,"reason":"降温场景需要保暖，该品类匹配且近月销量较好"}]}`
 
 const DEFAULT_PRODUCT_MATCH_USER = `【热点】
 标题：{{news_title}}
@@ -88,10 +102,10 @@ const DEFAULT_PRODUCT_MATCH_USER = `【热点】
 来源：{{news_source}}
 品类：{{news_category}}
 
-【商品库】
+【商品库候选】
 {{catalog_json}}
 
-请返回匹配结果 JSON。`
+请只从上述候选的 id 中选择，返回匹配结果 JSON。若不应推荐，返回 {"matches":[]}。`
 
 export const DEFAULT_PROMPTS: PromptConfig = {
   systemRole: DEFAULT_SYSTEM_ROLE,
@@ -381,4 +395,19 @@ export const PLACEHOLDERS: { key: string; label: string; hint: string }[] = [
     hint: '单件：卖点顿号拼接',
   },
   { key: 'product_category', label: '品类', hint: '单件：品类' },
+  {
+    key: 'product_monthly_sales',
+    label: '近月销量',
+    hint: '单件：近月销量（可配合条件块）',
+  },
+  {
+    key: 'product_return_rate',
+    label: '退货率',
+    hint: '单件：退货率百分比（可配合条件块）',
+  },
+  {
+    key: 'product_gross_margin',
+    label: '毛利率',
+    hint: '单件：毛利率百分比（可配合条件块）',
+  },
 ]

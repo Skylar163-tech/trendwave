@@ -100,7 +100,11 @@ export function SourcesPage({ draft, onChange }: Props) {
                 {s.name}
               </label>
               <span className="rounded-md bg-surface-100 px-1.5 py-0.5 text-[10px] text-surface-700">
-                {s.kind === 'builtin' ? '内置热榜' : 'RSS 订阅'}
+                {s.kind === 'builtin'
+                  ? s.endpoint === 'toutiao'
+                    ? '热榜·真实'
+                    : '内置热榜·演示'
+                  : 'RSS 订阅'}
               </span>
               <span className="truncate text-xs text-surface-700/55">
                 {s.endpoint}
@@ -120,6 +124,13 @@ export function SourcesPage({ draft, onChange }: Props) {
 
         <div className="mt-4 rounded-xl border border-dashed border-surface-300 p-3">
           <div className="text-sm font-semibold">添加 RSS 订阅</div>
+          <p className="mt-1 text-xs leading-relaxed text-surface-700/70">
+            需填写可公开访问的 RSS/Atom 地址。可用示例：
+            <code className="mx-1 rounded bg-surface-100 px-1">
+              https://www.36kr.com/feed
+            </code>
+            。今日头条请启用上方内置「今日头条热榜」（服务端拉取热榜 JSON），不要把头条号「内容源接入」规范页当成订阅地址——那是媒体向头条投稿用的 RSS 格式说明。
+          </p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <input
               value={name}
@@ -130,7 +141,7 @@ export function SourcesPage({ draft, onChange }: Props) {
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com/feed.xml"
+              placeholder="https://www.36kr.com/feed"
               className="rounded-lg border px-3 py-2 text-sm"
             />
           </div>

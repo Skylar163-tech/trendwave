@@ -352,7 +352,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       const msgs = [...warnings]
       if (usedFallback) {
         msgs.push(
-          '启用信源暂无数据，已回退演示热点列表。可在运营后台「信源」配置 RSS。',
+          '启用信源暂无有效条目，已回退演示热点列表。请在运营后台「信源」改用可访问的 RSS（如 https://www.36kr.com/feed）并点「测试全部来源」。',
         )
       }
       if (gate.flaggedCount > 0) {

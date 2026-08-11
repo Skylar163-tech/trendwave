@@ -27,7 +27,7 @@ flowchart TB
 trendwave/
 ├── docs/                     # 项目文档
 ├── server/
-│   ├── index.mjs             # 配置 / LLM 中转 / RSS
+│   ├── index.mjs             # 配置 / LLM 中转 / RSS / 热榜
 │   └── data/
 │       ├── .gitkeep
 │       ├── config.example.json
@@ -68,7 +68,15 @@ flowchart LR
 
 ### 热点抓取
 
-「立即抓取」→ [`fetchEnabledNews`](../src/services/newsSources.ts)（后台信源：内置演示 / RSS），不经扣子全流程灌入。
+「立即抓取」→ [`fetchEnabledNews`](../src/services/newsSources.ts)（仅启用信源），不经扣子：
+
+| 信源类型 | 行为 |
+|---------|------|
+| `builtin` + `toutiao` | `GET /api/sources/hotboard?platform=toutiao` 真实热榜 |
+| `builtin` 其他 | 本地 mock 热榜 |
+| `rss` | `GET /api/sources/fetch?url=` 服务端拉取并解析 RSS/Atom；空内容 / HTML / 无条目返回错误 |
+
+全部启用源合计 0 条时，工作台回退 `MOCK_NEWS` 并提示「演示回退」。新闻列表 UI 为响应式卡片网格（`sm` 2 列 / `xl` 3 列）。
 
 ### 配置读写
 

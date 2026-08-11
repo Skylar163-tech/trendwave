@@ -15,6 +15,7 @@ export interface SourceTestResult {
 function friendlyFetchError(err: unknown, status?: number): string {
   if (status === 404) return '地址不对或资源不存在（404）'
   if (status === 403 || status === 401) return '对方拒绝访问（鉴权/权限）'
+  if (status === 422) return '订阅源无效或无法解析'
   if (status === 429) return '对方限流，请稍后再试'
   if (status && status >= 500) return '对方服务异常'
   const msg = err instanceof Error ? err.message : String(err)
@@ -23,6 +24,9 @@ function friendlyFetchError(err: unknown, status?: number): string {
   if (/CORS/i.test(msg)) return '浏览器跨域限制（建议走服务端中转）'
   return msg || '未知错误'
 }
+
+/** 已接入真实拉取的内置热榜（其余仍为演示 mock） */
+const LIVE_HOTBOARD = new Set(['toutiao'])
 
 /** 内置热榜：原型演示用模拟数据（按 endpoint 过滤） */
 function builtinItems(endpoint: string): NewsItem[] {
@@ -44,31 +48,85 @@ function builtinItems(endpoint: string): NewsItem[] {
   }))
 }
 
-async function fetchRss(url: string, signal: AbortSignal): Promise<NewsItem[]> {
-  const res = await fetch(`/api/sources/fetch?url=${encodeURIComponent(url)}`, {
-    signal,
-  })
-  const text = await res.text()
-  if (!res.ok) {
-    throw new Error(friendlyFetchError(null, res.status) + (text ? `：${text.slice(0, 80)}` : ''))
-  }
-  let data: { items?: Array<Record<string, unknown>> }
-  try {
-    data = JSON.parse(text) as typeof data
-  } catch {
-    throw new Error('订阅源返回无法解析')
-  }
-  const items = data.items ?? []
+function mapRemoteItems(
+  items: Array<Record<string, unknown>>,
+  idPrefix: string,
+): NewsItem[] {
   return items.slice(0, 20).map((it, i) => ({
-    id: `rss-${Date.now()}-${i}`,
+    id: `${idPrefix}-${Date.now()}-${i}`,
     title: String(it.title ?? '无标题'),
-    source: String(it.source ?? 'RSS'),
+    source: String(it.source ?? '资讯'),
     heat: Number(it.heat ?? 500 - i * 10),
     category: String(it.category ?? '资讯'),
     summary: String(it.summary ?? it.title ?? ''),
     publishedAt: String(it.publishedAt ?? new Date().toISOString()),
     tags: Array.isArray(it.tags) ? it.tags.map(String) : ['资讯'],
   }))
+}
+
+async function fetchHotBoard(
+  platform: string,
+  signal: AbortSignal,
+): Promise<NewsItem[]> {
+  const res = await fetch(
+    `/api/sources/hotboard?platform=${encodeURIComponent(platform)}`,
+    { signal },
+  )
+  const text = await res.text()
+  if (!res.ok) {
+    const detail = parseFetchErrorBody(text)
+    throw new Error(detail || friendlyFetchError(null, res.status))
+  }
+  let data: { items?: Array<Record<string, unknown>>; error?: string }
+  try {
+    data = JSON.parse(text) as typeof data
+  } catch {
+    throw new Error('热榜返回无法解析')
+  }
+  const items = data.items ?? []
+  if (!items.length) {
+    throw new Error(data.error || '热榜暂无条目')
+  }
+  return mapRemoteItems(items, `hot-${platform}`)
+}
+
+function parseFetchErrorBody(text: string): string {
+  try {
+    const data = JSON.parse(text) as { error?: string; detail?: string }
+    if (data.error) {
+      return data.detail ? `${data.error}（${data.detail}）` : data.error
+    }
+  } catch {
+    /* plain text */
+  }
+  const trimmed = text.trim()
+  return trimmed ? trimmed.slice(0, 120) : ''
+}
+
+async function fetchRss(url: string, signal: AbortSignal): Promise<NewsItem[]> {
+  const res = await fetch(`/api/sources/fetch?url=${encodeURIComponent(url)}`, {
+    signal,
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    const detail = parseFetchErrorBody(text)
+    throw new Error(
+      detail ||
+        friendlyFetchError(null, res.status) +
+          (text ? `：${text.slice(0, 80)}` : ''),
+    )
+  }
+  let data: { items?: Array<Record<string, unknown>>; error?: string }
+  try {
+    data = JSON.parse(text) as typeof data
+  } catch {
+    throw new Error('订阅源返回无法解析')
+  }
+  const items = data.items ?? []
+  if (!items.length) {
+    throw new Error(data.error || '订阅源无条目，请换有效的 RSS/Atom 地址')
+  }
+  return mapRemoteItems(items, 'rss')
 }
 
 export async function testNewsSource(
@@ -101,6 +159,17 @@ export async function testNewsSource(
         }
       }
       const items = await fetchRss(source.endpoint, ctrl.signal)
+      return {
+        id: source.id,
+        name: source.name,
+        ok: true,
+        count: items.length,
+        latencyMs: Math.round(performance.now() - started),
+        items,
+      }
+    }
+    if (source.kind === 'builtin' && LIVE_HOTBOARD.has(source.endpoint)) {
+      const items = await fetchHotBoard(source.endpoint, ctrl.signal)
       return {
         id: source.id,
         name: source.name,

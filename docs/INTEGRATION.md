@@ -28,6 +28,7 @@
 - 结果写入 `NewsItem.gateStatus` / `gateCategories` / `gateReason`
 - 卡片标注「需人工审核 · 涉及…」；进入下一步需确认
 - `model.mode === mock` 时走本地关键词规则
+- **输出契约**：JSON `{"results":[{"id","status":"clear|needs_review","categories","reason"}]}`；不要改成 `SKIP_SENSITIVE` 等纯文本标签
 
 ### 商品智能匹配（建议匹配 → 确认匹配）
 
@@ -37,8 +38,15 @@
 - 只允许返回商品库中已有 `id`；失败时降级标签/品类启发
 - 卡片下展示匹配理由；点选「采纳」后进入确认匹配
 - 确认匹配：可保留 AI 结果，或分页搜索全库补选并最终绑定
+- **输出契约**：JSON `{"matches":[{"productId","score","reason"}]}`；无自然关联时返回空数组，不要只输出关键词或「没有对应内容」
 
 详见运营后台「提示词」页中的对应区块。
+
+### 文案创作契约
+
+- `systemRole` + `materialTemplate` 生成**一条微博纯正文**（可含 Emoji / `#话题`）
+- 不要改成「新闻标题 / 推荐决策 / 经营指标 / 微博文案」多字段报告，否则机审与返工链路会失效
+- 单件商品格式可含条件块：`{{#product_monthly_sales}}` 等经营指标（无数据则省略）
 
 ## LLM 访问模式（`AppConfig.model.mode`）
 

@@ -321,7 +321,7 @@ export function PromptsPage({ draft, onChange }: Props) {
       <AdminSectionCard
         id="role"
         title="角色与写作规范"
-        description="对模型的 system 角色设定与写作约束"
+        description="文案专家 system：微博种草约束；输出须为纯正文，勿改成多字段报告"
         actions={
           <button
             type="button"
@@ -347,7 +347,7 @@ export function PromptsPage({ draft, onChange }: Props) {
       <AdminSectionCard
         id="material"
         title="素材拼装模板"
-        description="每次调用时用占位符拼装热点与商品素材（user 消息）"
+        description="文案 user 消息：拼装热点与商品；勿改成多字段决策报告格式"
         actions={
           <button
             type="button"
@@ -587,7 +587,7 @@ export function PromptsPage({ draft, onChange }: Props) {
       <AdminSectionCard
         id="news-gate"
         title="借势硬边界审核"
-        description="新闻抓取后批量审核是否适合品牌借势；命中风险的新闻会标注「需人工审核」"
+        description="对应「新闻安全」：抓取后批量审核；须输出 JSON results，命中风险标「需人工审核」"
         actions={
           <button
             type="button"
@@ -652,7 +652,7 @@ export function PromptsPage({ draft, onChange }: Props) {
       <AdminSectionCard
         id="product-match"
         title="商品智能匹配"
-        description="建议匹配步：按热点从商品库挑选商品；可在此改提示词并试运行验证 JSON"
+        description="对应「商品匹配专家」：须输出 JSON matches（商品库 id）；无自然关联时返回空数组"
         actions={
           <button
             type="button"
