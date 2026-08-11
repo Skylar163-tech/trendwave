@@ -68,6 +68,21 @@ export function ProductCardView({
             </span>
           ))}
         </div>
+        {(product.monthlySales != null ||
+          product.returnRate != null ||
+          product.grossMargin != null) && (
+          <div className="flex flex-wrap gap-2 text-[10px] text-surface-700/55">
+            {product.monthlySales != null && (
+              <span>近月 {product.monthlySales}</span>
+            )}
+            {product.returnRate != null && (
+              <span>退货 {(product.returnRate * 100).toFixed(1)}%</span>
+            )}
+            {product.grossMargin != null && (
+              <span>毛利 {(product.grossMargin * 100).toFixed(0)}%</span>
+            )}
+          </div>
+        )}
       </div>
     </>
   )

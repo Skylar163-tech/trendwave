@@ -8,7 +8,8 @@ import {
   parseProductsJson,
   productsToCsv,
   productsToJson,
-  validateProductCsv,
+  importProductSpreadsheet,
+  CSV_IMPORT_HINT,
 } from '../../services/productCsv'
 import { AdminSectionCard, FieldError } from '../shared'
 import { ProductCardView } from '../components/ProductCardView'
@@ -200,8 +201,8 @@ export function ProductsPage({ draft, onChange }: Props) {
 
   const handleImportFile = async (file: File) => {
     setImportReport(null)
-    const text = await file.text()
     if (importMode === 'json') {
+      const text = await file.text()
       const parsed = parseProductsJson(text)
       if (!parsed.ok) {
         setImportReport(
@@ -217,18 +218,21 @@ export function ProductsPage({ draft, onChange }: Props) {
       setImportReport(`已导入 ${parsed.products.length} 件商品（覆盖当前列表）`)
       return
     }
-    const { issues, rows } = validateProductCsv(text)
-    if (issues.length) {
+    const { issues, rows, mappedHeaders, format } =
+      await importProductSpreadsheet(file)
+    if (!rows.length) {
       setImportReport(
         `校验失败，未导入任何数据：\n` +
-          issues.map((i) => `第 ${i.row} 行：${i.reason}`).join('\n'),
+          (issues.length
+            ? issues.map((i) => `第 ${i.row} 行：${i.reason}`).join('\n')
+            : '没有有效商品行'),
       )
       return
     }
     const products: CatalogProduct[] = rows.map((r, i) => ({
       id: nextProductId(draft.products, i),
       name: r.name,
-      brand: r.name.slice(0, 2),
+      brand: r.brand?.trim() || r.name.slice(0, 2),
       icon: r.icon,
       price: r.price,
       originalPrice: r.originalPrice,
@@ -236,9 +240,22 @@ export function ProductsPage({ draft, onChange }: Props) {
       category: r.category,
       imageTone: GRADIENT_PRESETS[i % GRADIENT_PRESETS.length]!,
       stock: 1000,
+      monthlySales: r.monthlySales,
+      returnRate: r.returnRate,
+      grossMargin: r.grossMargin,
     }))
     setProducts(products)
-    setImportReport(`已导入 ${products.length} 件商品（覆盖当前列表）`)
+    const warn =
+      issues.length > 0
+        ? `\n注意（已跳过/忽略部分行）：\n` +
+          issues.map((i) => `第 ${i.row} 行：${i.reason}`).join('\n')
+        : ''
+    const mapHint = mappedHeaders.length
+      ? `\n列映射：${mappedHeaders.join('，')}`
+      : ''
+    setImportReport(
+      `已导入 ${products.length} 件商品（${format === 'xlsx' ? 'Excel' : 'CSV'}，覆盖当前列表）${mapHint}${warn}`,
+    )
   }
 
   const exportCsv = () => {
@@ -420,7 +437,7 @@ export function ProductsPage({ draft, onChange }: Props) {
       <AdminSectionCard
         id="import"
         title="导入导出"
-        description="支持 CSV 或 JSON 批量导入；导入会覆盖当前列表"
+        description={CSV_IMPORT_HINT}
       >
         <div className="flex flex-wrap gap-2">
           <select
@@ -428,13 +445,17 @@ export function ProductsPage({ draft, onChange }: Props) {
             onChange={(e) => setImportMode(e.target.value as 'csv' | 'json')}
             className="rounded-lg border px-2 py-1.5 text-sm"
           >
-            <option value="csv">导入 CSV</option>
+            <option value="csv">导入 Excel / CSV</option>
             <option value="json">导入 JSON</option>
           </select>
           <input
             ref={fileRef}
             type="file"
-            accept={importMode === 'csv' ? '.csv,text/csv' : '.json'}
+            accept={
+              importMode === 'csv'
+                ? '.csv,.tsv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel'
+                : '.json'
+            }
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0]
@@ -465,7 +486,14 @@ export function ProductsPage({ draft, onChange }: Props) {
           </button>
         </div>
         {importReport && (
-          <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-surface-50 p-3 text-xs text-rose-700">
+          <pre
+            className={[
+              'mt-3 whitespace-pre-wrap rounded-lg p-3 text-xs',
+              importReport.startsWith('已导入')
+                ? 'bg-emerald-50 text-emerald-800'
+                : 'bg-surface-50 text-rose-700',
+            ].join(' ')}
+          >
             {importReport}
           </pre>
         )}

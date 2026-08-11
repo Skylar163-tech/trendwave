@@ -1,4 +1,5 @@
-import type { ModelAccessMode, ModelConfig } from '../config/types'
+import type { ModelAccessMode, ModelConfig, ModelTemperatures } from '../config/types'
+import { DEFAULT_MODEL_TEMPERATURES } from '../config/defaults'
 
 export type FriendlyLlmErrorCode =
   | 'invalid_key'
@@ -223,4 +224,19 @@ export function accessModeLabel(mode: ModelAccessMode): string {
     case 'direct':
       return '浏览器直连'
   }
+}
+
+/** 读取分场景温度；缺省时回落默认或旧版 temperature */
+export function resolveSceneTemperature(
+  config: ModelConfig,
+  scene: keyof ModelTemperatures,
+): number {
+  const fromScene = config.temperatures?.[scene]
+  if (typeof fromScene === 'number' && Number.isFinite(fromScene)) {
+    return fromScene
+  }
+  if (scene === 'creative' && typeof config.temperature === 'number') {
+    return config.temperature
+  }
+  return DEFAULT_MODEL_TEMPERATURES[scene]
 }

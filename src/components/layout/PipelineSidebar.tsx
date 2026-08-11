@@ -16,7 +16,7 @@ function stepStatus(
 
   let done = false
   if (id === 'news') done = selectedNews && curIdx > 0
-  if (id === 'suggest') done = selectedProduct && curIdx > 1
+  if (id === 'suggest') done = curIdx > 1
   if (id === 'match') done = selectedProduct && curIdx > 2
   if (id === 'copy') done = hasCopy && curIdx > 3
   if (id === 'review') done = false
@@ -104,7 +104,7 @@ export function PipelineSidebar() {
       </nav>
 
       <div className="border-t border-surface-200/70 p-4 text-[11px] leading-relaxed text-surface-700/60">
-        「立即抓取」可一次调用扣子全流程，结果灌入新闻 / 商品 / 文案；审核发送仍在本页完成。
+        建议匹配看 AI，确认匹配做人工终审与全库补选；主路径由运营后台配置驱动。
       </div>
     </aside>
   )

@@ -6,10 +6,10 @@ import type {
 } from '../types/workflow'
 
 export const CURRENT_USER: WorkflowUser = {
-  name: '林晓晴',
-  account: 'ops.lin@trendwave.io',
+  name: 'Skyalr',
+  account: 'songjiaying_skylar@163.com',
   role: '电商运营 · 媒体采编',
-  avatarInitials: '林',
+  avatarInitials: 'S',
   loggedIn: true,
 }
 
@@ -19,21 +19,21 @@ export const PIPELINE_STEPS: PipelineStepMeta[] = [
     index: 1,
     title: '新闻抓取',
     short: '热点列表',
-    description: '监控全网热点，挑选爆款新闻',
+    description: '拉取热点并做借势合规硬边界审核',
   },
   {
     id: 'suggest',
     index: 2,
-    title: '建议匹配商品',
-    short: '智能推荐',
-    description: '系统自动关联热点与商品库',
+    title: '建议匹配',
+    short: 'AI 推荐',
+    description: 'LLM 按热点从商品库给出建议',
   },
   {
     id: 'match',
     index: 3,
-    title: '匹配商品',
-    short: '深度筛选',
-    description: '手动筛选并绑定目标商品',
+    title: '确认匹配',
+    short: '人工终审',
+    description: '定稿投放商品，可全库补选',
   },
   {
     id: 'copy',
@@ -109,7 +109,7 @@ export const MOCK_NEWS: NewsItem[] = [
   },
 ]
 
-/** Products keyed by news id — used for suggest/match steps */
+/** Products keyed by news id — used for suggest/match fallbacks */
 export const PRODUCTS_BY_NEWS: Record<string, Product[]> = {
   n1: [
     {

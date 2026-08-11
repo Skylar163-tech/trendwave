@@ -10,8 +10,9 @@ import {
 } from 'react'
 import { MOCK_NEWS, PRODUCTS_BY_NEWS } from '../data/mock'
 import { generateWeiboCopy, type CopySource } from '../services/copyGenerator'
-import { runCozePipeline } from '../services/cozePipeline'
 import { fetchEnabledNews } from '../services/newsSources'
+import { runNewsGate } from '../services/newsGate'
+import { matchProductsForNews } from '../services/productMatch'
 import type {
   CopyVariant,
   NewsItem,
@@ -19,8 +20,6 @@ import type {
   Product,
   ReviewStatus,
 } from '../types/workflow'
-import { isIntegrationReady } from '../types/integration'
-import { useIntegration } from './IntegrationContext'
 import { useAppConfig } from './AppConfigContext'
 import type { CatalogProduct } from '../config/types'
 
@@ -32,6 +31,7 @@ interface WorkflowContextValue {
   selectedNews: NewsItem | null
   selectNews: (news: NewsItem) => void
   suggestedProducts: Product[]
+  matchReasons: Record<string, string>
   selectedProduct: Product | null
   selectProduct: (product: Product) => void
   catalogFilter: string
@@ -46,12 +46,15 @@ interface WorkflowContextValue {
   generateCopy: () => Promise<void>
   selectCopy: (id: string) => void
   updateCopyContent: (content: string) => void
-  /** 方案 A：立即抓取 → 一次调用全流程工作流 */
   isFetchingPipeline: boolean
   pipelineWarning: string | null
-  pipelineSource: 'mock' | 'workflow' | null
+  pipelineSource: 'sources' | 'fallback' | null
   lastFetchedAt: string
   fetchPipeline: () => Promise<void>
+  isMatchingProducts: boolean
+  matchWarning: string | null
+  matchSource: 'llm' | 'heuristic' | 'static' | 'empty' | null
+  rematchProducts: () => Promise<void>
   reviewStatus: ReviewStatus
   approveCopy: () => void
   publishCopy: () => void
@@ -94,7 +97,7 @@ function catalogToProduct(p: CatalogProduct, matchScore = 80): Product {
     imageTone: p.imageTone,
     stock: p.stock,
     icon: p.icon,
-  } as Product & { icon: string }
+  }
 }
 
 function buildProductsByNews(
@@ -112,7 +115,6 @@ function buildProductsByNews(
       })
       .filter((p): p is Product => Boolean(p))
   }
-  // 若无推荐关系，回退 mock 映射中仍存在于商品库的项
   if (!Object.keys(out).length) {
     for (const [newsId, list] of Object.entries(PRODUCTS_BY_NEWS)) {
       out[newsId] = list
@@ -127,12 +129,11 @@ function buildProductsByNews(
 }
 
 export function WorkflowProvider({ children }: { children: ReactNode }) {
-  const { config } = useIntegration()
   const { config: appConfig } = useAppConfig()
   const [step, setStepState] = useState<PipelineStep>('news')
   const [isStepPending, startStepTransition] = useTransition()
   const [newsList, setNewsList] = useState<NewsItem[]>(MOCK_NEWS)
-  const [productsByNewsId, setProductsByNewsId] = useState<
+  const [staticProductsByNewsId, setStaticProductsByNewsId] = useState<
     Record<string, Product[]>
   >(() =>
     buildProductsByNews(
@@ -140,12 +141,16 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       appConfig.products,
     ),
   )
+  /** LLM / 启发匹配覆盖静态推荐 */
+  const [llmProductsByNewsId, setLlmProductsByNewsId] = useState<
+    Record<string, Product[]>
+  >({})
+  const [matchReasonsByNewsId, setMatchReasonsByNewsId] = useState<
+    Record<string, Record<string, string>>
+  >({})
   const [selectedTone, setSelectedTone] = useState(
     () => appConfig.tonePresets[0] ?? '热点借势',
   )
-  const [copyVariantsByNewsId, setCopyVariantsByNewsId] = useState<
-    Record<string, CopyVariant[]>
-  >({})
   const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [catalogFilter, setCatalogFilter] = useState('')
@@ -157,14 +162,18 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('pending')
   const [isFetchingPipeline, setIsFetchingPipeline] = useState(false)
   const [pipelineWarning, setPipelineWarning] = useState<string | null>(null)
-  const [pipelineSource, setPipelineSource] = useState<'mock' | 'workflow' | null>(
-    null,
-  )
+  const [pipelineSource, setPipelineSource] = useState<
+    'sources' | 'fallback' | null
+  >(null)
   const [lastFetchedAt, setLastFetchedAt] = useState('尚未同步')
+  const [isMatchingProducts, setIsMatchingProducts] = useState(false)
+  const [matchWarning, setMatchWarning] = useState<string | null>(null)
+  const [matchSource, setMatchSource] = useState<
+    'llm' | 'heuristic' | 'static' | 'empty' | null
+  >(null)
 
-  // 后台商品库 / 推荐关系变更时同步工作台
   useEffect(() => {
-    setProductsByNewsId(
+    setStaticProductsByNewsId(
       buildProductsByNews(appConfig.newsRecommendations, appConfig.products),
     )
   }, [appConfig.products, appConfig.newsRecommendations])
@@ -183,40 +192,34 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     [appConfig.products],
   )
 
+  const productsByNewsId = useMemo(() => {
+    return { ...staticProductsByNewsId, ...llmProductsByNewsId }
+  }, [staticProductsByNewsId, llmProductsByNewsId])
+
   const suggestedProducts = useMemo(() => {
     if (!selectedNews) return []
     const recommended = productsByNewsId[selectedNews.id]
     if (recommended?.length) return recommended
-    // 无推荐关系时：按品类/标签简单匹配商品库
-    const tags = new Set(selectedNews.tags.map((t) => t.toLowerCase()))
-    return productCatalog
-      .map((p) => {
-        let score = 50
-        if (tags.has(p.category.toLowerCase())) score += 20
-        for (const sp of p.sellingPoints) {
-          for (const t of tags) {
-            if (sp.toLowerCase().includes(t) || p.name.toLowerCase().includes(t))
-              score += 8
-          }
-        }
-        return { ...p, matchScore: Math.min(99, score) }
-      })
-      .sort((a, b) => b.matchScore - a.matchScore)
-      .slice(0, 6)
-  }, [selectedNews, productsByNewsId, productCatalog])
+    return []
+  }, [selectedNews, productsByNewsId])
 
+  const matchReasons = useMemo(() => {
+    if (!selectedNews) return {}
+    return matchReasonsByNewsId[selectedNews.id] ?? {}
+  }, [selectedNews, matchReasonsByNewsId])
+
+  /** 全库检索，供选品页「人工补选」 */
   const filteredCatalog = useMemo(() => {
-    const pool = suggestedProducts.length ? suggestedProducts : productCatalog
     const q = catalogFilter.trim().toLowerCase()
-    if (!q) return pool
-    return pool.filter(
+    if (!q) return productCatalog
+    return productCatalog.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.brand.toLowerCase().includes(q) ||
         p.category.toLowerCase().includes(q) ||
         p.sellingPoints.some((s) => s.toLowerCase().includes(q)),
     )
-  }, [suggestedProducts, catalogFilter, productCatalog])
+  }, [catalogFilter, productCatalog])
 
   const selectedCopy = useMemo(
     () => copyVariants.find((v) => v.id === selectedCopyId) ?? null,
@@ -228,7 +231,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       const targetIdx = STEP_ORDER.indexOf(target)
       if (targetIdx <= 0) return true
       if (targetIdx >= 1 && !selectedNews) return false
-      if (targetIdx >= 2 && !selectedNews) return false
+      // 确认匹配：至少选过热点；创作起需最终绑定商品
       if (targetIdx >= 3 && !selectedProduct) return false
       if (targetIdx >= 4 && !selectedCopy) return false
       return true
@@ -251,90 +254,91 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     [canEnterStep, step],
   )
 
-  const selectNews = useCallback(
-    (news: NewsItem) => {
-      setSelectedNews(news)
-      setSelectedProduct(null)
-      setCatalogFilter('')
-      setReviewStatus('pending')
-      const cached = copyVariantsByNewsId[news.id]
-      if (cached?.length) {
-        setCopyVariants(cached)
-        setSelectedCopyId(cached[0]?.id ?? null)
-        setCopySource('workflow')
-        setCopyWarning(null)
-      } else {
-        setCopyVariants([])
-        setSelectedCopyId(null)
-        setCopySource(null)
-        setCopyWarning(null)
-      }
-    },
-    [copyVariantsByNewsId],
-  )
+  const selectNews = useCallback((news: NewsItem) => {
+    setSelectedNews(news)
+    setSelectedProduct(null)
+    setCatalogFilter('')
+    setReviewStatus('pending')
+    setCopyVariants([])
+    setSelectedCopyId(null)
+    setCopySource(null)
+    setCopyWarning(null)
+    setMatchWarning(null)
+  }, [])
 
-  const selectProduct = useCallback(
-    (product: Product) => {
-      setSelectedProduct(product)
-      setReviewStatus('pending')
-      // 全流程已带文案时保留；否则清空等待生成
-      if (selectedNews) {
-        const cached = copyVariantsByNewsId[selectedNews.id]
-        if (cached?.length) {
-          setCopyVariants(cached)
-          setSelectedCopyId(cached[0]?.id ?? null)
-          setCopySource('workflow')
-          setCopyWarning(null)
-          return
-        }
+  const selectProduct = useCallback((product: Product) => {
+    setSelectedProduct(product)
+    setReviewStatus('pending')
+    setCopyVariants([])
+    setSelectedCopyId(null)
+    setCopySource(null)
+    setCopyWarning(null)
+  }, [])
+
+  const rematchProducts = useCallback(async () => {
+    if (!selectedNews) return
+    setIsMatchingProducts(true)
+    setMatchWarning(null)
+    try {
+      const result = await matchProductsForNews(
+        selectedNews,
+        appConfig.products,
+        appConfig,
+      )
+      const products = result.matches.map((m) => m.product)
+      const reasons: Record<string, string> = {}
+      for (const m of result.matches) {
+        reasons[m.product.id] = m.reason
       }
-      setCopyVariants([])
-      setSelectedCopyId(null)
-      setCopySource(null)
-      setCopyWarning(null)
-    },
-    [selectedNews, copyVariantsByNewsId],
-  )
+      setLlmProductsByNewsId((prev) => ({
+        ...prev,
+        [selectedNews.id]: products,
+      }))
+      setMatchReasonsByNewsId((prev) => ({
+        ...prev,
+        [selectedNews.id]: reasons,
+      }))
+      setMatchSource(
+        result.source === 'llm'
+          ? 'llm'
+          : result.source === 'heuristic'
+            ? 'heuristic'
+            : 'empty',
+      )
+      setMatchWarning(result.warning ?? null)
+      if (
+        selectedProduct &&
+        !products.some((p) => p.id === selectedProduct.id)
+      ) {
+        setSelectedProduct(null)
+      }
+    } catch (err) {
+      setMatchWarning(err instanceof Error ? err.message : '商品匹配失败')
+    } finally {
+      setIsMatchingProducts(false)
+    }
+  }, [selectedNews, appConfig, selectedProduct])
 
   const fetchPipeline = useCallback(async () => {
     setIsFetchingPipeline(true)
     setPipelineWarning(null)
     try {
-      // 优先：按启用的抓取来源拉取（后台可配置）
-      if (config.mode === 'mock' || !isIntegrationReady(config)) {
-        const { news, warnings } = await fetchEnabledNews(appConfig.sources)
-        await new Promise((r) => setTimeout(r, 400))
-        setNewsList(news.length ? news : MOCK_NEWS)
-        setProductsByNewsId(
-          buildProductsByNews(
-            appConfig.newsRecommendations,
-            appConfig.products,
-          ),
-        )
-        setCopyVariantsByNewsId({})
-        setSelectedNews(null)
-        setSelectedProduct(null)
-        setCopyVariants([])
-        setSelectedCopyId(null)
-        setCopySource(null)
-        setCopyWarning(null)
-        setReviewStatus('pending')
-        setPipelineSource('mock')
-        setLastFetchedAt(nowLabel())
-        const msgs = [...warnings]
-        if (config.mode !== 'mock') {
-          msgs.unshift(
-            '集成配置不完整，已使用本地/配置来源热点。可在后台「模型接入」或顶栏集成配置中完善。',
-          )
-        }
-        setPipelineWarning(msgs.length ? msgs.join('；') : null)
-        return
-      }
+      const { news, warnings } = await fetchEnabledNews(appConfig.sources)
+      const usedFallback = !news.length
+      const baseList = usedFallback ? MOCK_NEWS : news
 
-      const result = await runCozePipeline(config)
-      setNewsList(result.newsList)
-      setProductsByNewsId(result.productsByNewsId)
-      setCopyVariantsByNewsId(result.copyVariantsByNewsId)
+      const gate = await runNewsGate(baseList, appConfig)
+      setNewsList(gate.news)
+      setStaticProductsByNewsId(
+        buildProductsByNews(
+          appConfig.newsRecommendations,
+          appConfig.products,
+        ),
+      )
+      setLlmProductsByNewsId({})
+      setMatchReasonsByNewsId({})
+      setMatchSource(null)
+      setMatchWarning(null)
       setSelectedNews(null)
       setSelectedProduct(null)
       setCopyVariants([])
@@ -342,17 +346,30 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       setCopySource(null)
       setCopyWarning(null)
       setReviewStatus('pending')
-      setPipelineSource('workflow')
+      setPipelineSource(usedFallback ? 'fallback' : 'sources')
       setLastFetchedAt(nowLabel())
-      setPipelineWarning(result.warning ?? null)
+
+      const msgs = [...warnings]
+      if (usedFallback) {
+        msgs.push(
+          '启用信源暂无数据，已回退演示热点列表。可在运营后台「信源」配置 RSS。',
+        )
+      }
+      if (gate.flaggedCount > 0) {
+        msgs.push(
+          `借势硬边界：${gate.flaggedCount} 条热点需人工审核（已在卡片标注）。`,
+        )
+      }
+      if (gate.warning) msgs.push(gate.warning)
+      setPipelineWarning(msgs.length ? msgs.join('；') : null)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : '工作流调用失败'
+        err instanceof Error ? err.message : '热点抓取失败'
       setPipelineWarning(`${message}（仍显示当前列表）`)
     } finally {
       setIsFetchingPipeline(false)
     }
-  }, [config, appConfig.sources, appConfig.newsRecommendations, appConfig.products])
+  }, [appConfig])
 
   const generateCopy = useCallback(async () => {
     if (!selectedNews || !selectedProduct) return
@@ -362,7 +379,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       const result = await generateWeiboCopy(
         selectedNews,
         selectedProduct,
-        config,
+        null,
         appConfig,
         { tone: selectedTone, enableRework: true },
       )
@@ -374,7 +391,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsGenerating(false)
     }
-  }, [selectedNews, selectedProduct, config, appConfig, selectedTone])
+  }, [selectedNews, selectedProduct, appConfig, selectedTone])
 
   const selectCopy = useCallback((id: string) => {
     setSelectedCopyId(id)
@@ -415,6 +432,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       selectedNews,
       selectNews,
       suggestedProducts,
+      matchReasons,
       selectedProduct,
       selectProduct,
       catalogFilter,
@@ -434,6 +452,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       pipelineSource,
       lastFetchedAt,
       fetchPipeline,
+      isMatchingProducts,
+      matchWarning,
+      matchSource,
+      rematchProducts,
       reviewStatus,
       approveCopy,
       publishCopy,
@@ -452,6 +474,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       selectedNews,
       selectNews,
       suggestedProducts,
+      matchReasons,
       selectedProduct,
       selectProduct,
       catalogFilter,
@@ -470,6 +493,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       pipelineSource,
       lastFetchedAt,
       fetchPipeline,
+      isMatchingProducts,
+      matchWarning,
+      matchSource,
+      rematchProducts,
       reviewStatus,
       approveCopy,
       publishCopy,

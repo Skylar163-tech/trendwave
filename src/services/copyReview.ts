@@ -5,7 +5,7 @@ import {
   type CheckItem,
   type MachineCheckResult,
 } from './copyQA'
-import { callChatModel, FriendlyLlmError } from './llmClient'
+import { callChatModel, FriendlyLlmError, resolveSceneTemperature } from './llmClient'
 import type { CatalogProduct } from '../config/types'
 import { buildMaterialPrompt } from './promptEngine'
 
@@ -101,7 +101,7 @@ export async function reviewCopyWithModel(
           content: `热点：${meta.newsTitle}\n商品：${meta.productNames}\n文案：\n${copy}`,
         },
       ],
-      { temperature: 0.2 },
+      { temperature: resolveSceneTemperature(config.model, 'review') },
     )
     return parseReviewPayload(result.content)
   } catch (err) {
@@ -220,7 +220,7 @@ export async function autoReworkCopy(opts: {
           { role: 'system', content: opts.config.prompts.systemRole },
           { role: 'user', content: userPrompt },
         ],
-        { temperature: 0.2 },
+        { temperature: resolveSceneTemperature(opts.config.model, 'review') },
       )
       nextContent = result.content.trim()
     } catch {

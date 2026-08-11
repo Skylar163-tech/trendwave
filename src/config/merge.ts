@@ -1,8 +1,48 @@
-import { DEFAULT_APP_CONFIG } from './defaults'
-import type { AppConfig, CatalogProduct, CreativeStyle, EvalCase } from './types'
+import { DEFAULT_APP_CONFIG, DEFAULT_MODEL_TEMPERATURES } from './defaults'
+import type {
+  AppConfig,
+  CatalogProduct,
+  CreativeStyle,
+  EvalCase,
+  ModelTemperatures,
+} from './types'
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
+}
+
+function clampTemp(n: number): number {
+  if (!Number.isFinite(n)) return 0.8
+  return Math.min(1.5, Math.max(0, n))
+}
+
+function mergeTemperatures(
+  raw: unknown,
+  legacyCreative: number,
+): ModelTemperatures {
+  const base: ModelTemperatures = {
+    ...DEFAULT_MODEL_TEMPERATURES,
+    creative: clampTemp(legacyCreative),
+  }
+  if (!isObject(raw)) return base
+  return {
+    creative:
+      typeof raw.creative === 'number'
+        ? clampTemp(raw.creative)
+        : base.creative,
+    newsGate:
+      typeof raw.newsGate === 'number'
+        ? clampTemp(raw.newsGate)
+        : DEFAULT_MODEL_TEMPERATURES.newsGate,
+    productMatch:
+      typeof raw.productMatch === 'number'
+        ? clampTemp(raw.productMatch)
+        : DEFAULT_MODEL_TEMPERATURES.productMatch,
+    review:
+      typeof raw.review === 'number'
+        ? clampTemp(raw.review)
+        : DEFAULT_MODEL_TEMPERATURES.review,
+  }
 }
 
 function mergeProduct(p: unknown, fallback?: CatalogProduct): CatalogProduct | null {
@@ -34,6 +74,18 @@ function mergeProduct(p: unknown, fallback?: CatalogProduct): CatalogProduct | n
         ? p.imageTone
         : base.imageTone,
     stock: Number.isFinite(Number(p.stock)) ? Number(p.stock) : base.stock,
+    monthlySales:
+      p.monthlySales != null && Number.isFinite(Number(p.monthlySales))
+        ? Number(p.monthlySales)
+        : undefined,
+    returnRate:
+      p.returnRate != null && Number.isFinite(Number(p.returnRate))
+        ? Number(p.returnRate)
+        : undefined,
+    grossMargin:
+      p.grossMargin != null && Number.isFinite(Number(p.grossMargin))
+        ? Number(p.grossMargin)
+        : undefined,
   }
 }
 
@@ -145,6 +197,22 @@ export function mergeWithDefaults(partial: unknown): AppConfig {
         typeof promptsSrc.reviewPrompt === 'string'
           ? promptsSrc.reviewPrompt
           : d.prompts.reviewPrompt,
+      newsGateSystemRole:
+        typeof promptsSrc.newsGateSystemRole === 'string'
+          ? promptsSrc.newsGateSystemRole
+          : d.prompts.newsGateSystemRole,
+      newsGateUserTemplate:
+        typeof promptsSrc.newsGateUserTemplate === 'string'
+          ? promptsSrc.newsGateUserTemplate
+          : d.prompts.newsGateUserTemplate,
+      productMatchSystemRole:
+        typeof promptsSrc.productMatchSystemRole === 'string'
+          ? promptsSrc.productMatchSystemRole
+          : d.prompts.productMatchSystemRole,
+      productMatchUserTemplate:
+        typeof promptsSrc.productMatchUserTemplate === 'string'
+          ? promptsSrc.productMatchUserTemplate
+          : d.prompts.productMatchUserTemplate,
     },
     creativeStyles,
     tonePresets,
@@ -173,6 +241,12 @@ export function mergeWithDefaults(partial: unknown): AppConfig {
         typeof modelSrc.temperature === 'number'
           ? modelSrc.temperature
           : d.model.temperature,
+      temperatures: mergeTemperatures(
+        modelSrc.temperatures,
+        typeof modelSrc.temperature === 'number'
+          ? modelSrc.temperature
+          : d.model.temperature,
+      ),
       stream: Boolean(modelSrc.stream),
       workflowUrl:
         typeof modelSrc.workflowUrl === 'string'

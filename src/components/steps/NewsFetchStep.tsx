@@ -1,5 +1,5 @@
 import { useWorkflow } from '../../context/WorkflowContext'
-import { useIntegration } from '../../context/IntegrationContext'
+import { isNewsGateFlagged } from '../../services/newsGate'
 import { NewsCard } from '../shared/NewsCard'
 
 export function NewsFetchStep() {
@@ -14,14 +14,29 @@ export function NewsFetchStep() {
     lastFetchedAt,
     fetchPipeline,
   } = useWorkflow()
-  const { config, isReady, openSettings } = useIntegration()
 
-  const modeHint =
-    config.mode === 'workflow' && isReady
-      ? '将调用扣子全流程工作流（新闻 → 匹配 → 文案）'
-      : config.mode === 'workflow' && !isReady
-        ? '工作流配置不完整，将回退本地模拟'
-        : '当前为本地模拟列表'
+  const sourceLabel =
+    pipelineSource === 'sources'
+      ? '运营信源'
+      : pipelineSource === 'fallback'
+        ? '演示回退'
+        : ''
+
+  const flaggedSelected = isNewsGateFlagged(selectedNews)
+
+  function handleNext() {
+    if (!selectedNews) return
+    if (flaggedSelected) {
+      const cats = selectedNews.gateCategories?.length
+        ? selectedNews.gateCategories.join('、')
+        : '敏感/争议话题'
+      const ok = window.confirm(
+        `硬边界提醒：该热点需人工审核（涉及${cats}）。\n\n${selectedNews.gateReason ?? ''}\n\n确认仍要进入商品匹配并借势？`,
+      )
+      if (!ok) return
+    }
+    setStep('suggest')
+  }
 
   return (
     <div className="animate-fade-up space-y-4">
@@ -31,27 +46,19 @@ export function NewsFetchStep() {
             新闻抓取
           </h2>
           <p className="mt-1 text-sm text-surface-700/65">
-            {config.mode === 'workflow' && isReady
-              ? '点击立即抓取，一次跑完扣子工作流并灌入后续步骤。'
-              : '模拟实时热点列表；配置扣子工作流后可一键同步真实结果。'}
-            <button
-              type="button"
-              onClick={openSettings}
+            按运营信源拉取热点后，自动做借势合规硬边界审核；高风险条目标注「需人工审核」。
+            <a
+              href="#/admin/prompts"
               className="ml-1 font-medium text-brand-600 underline-offset-2 hover:underline"
             >
-              集成配置
-            </button>
-            <span className="ml-1 text-surface-700/45">· {modeHint}</span>
+              调整审核提示词
+            </a>
           </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-surface-700/55">
             上次同步 {lastFetchedAt}
-            {pipelineSource === 'workflow'
-              ? ' · 工作流'
-              : pipelineSource === 'mock'
-                ? ' · 模拟'
-                : ''}
+            {sourceLabel ? ` · ${sourceLabel}` : ''}
           </span>
           <button
             type="button"
@@ -62,7 +69,7 @@ export function NewsFetchStep() {
             {isFetchingPipeline && (
               <span className="h-3.5 w-3.5 animate-spin-slow rounded-full border-2 border-white/30 border-t-white" />
             )}
-            {isFetchingPipeline ? '抓取中…' : '立即抓取'}
+            {isFetchingPipeline ? '抓取并审核…' : '立即抓取'}
           </button>
         </div>
       </div>
@@ -73,16 +80,24 @@ export function NewsFetchStep() {
         </div>
       )}
 
+      {flaggedSelected && selectedNews && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+          当前所选热点需人工审核
+          {selectedNews.gateCategories?.length
+            ? `（涉及${selectedNews.gateCategories.join('、')}）`
+            : ''}
+          。进入下一步前会再次确认。
+        </div>
+      )}
+
       {isFetchingPipeline && (
         <div className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50/40">
           <span className="h-7 w-7 animate-spin-slow rounded-full border-[3px] border-brand-200 border-t-brand-500" />
           <p className="text-sm font-medium text-brand-700">
-            {config.mode === 'workflow' && isReady
-              ? '正在调用扣子全流程工作流…'
-              : '正在刷新模拟热点…'}
+            正在拉取热点并做借势硬边界审核…
           </p>
           <p className="text-xs text-brand-600/70">
-            耗时取决于工作流（含新闻插件、循环与大模型）
+            审核提示词可在运营后台「提示词」中调整与试运行
           </p>
         </div>
       )}
@@ -110,10 +125,10 @@ export function NewsFetchStep() {
         <button
           type="button"
           disabled={!selectedNews}
-          onClick={() => setStep('suggest')}
+          onClick={handleNext}
           className="rounded-lg bg-surface-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          下一步：查看建议匹配
+          下一步：建议匹配
         </button>
       </div>
     </div>

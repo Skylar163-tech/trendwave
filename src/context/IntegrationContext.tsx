@@ -17,7 +17,7 @@ import type { ModelAccessMode } from '../config/types'
 
 function modelModeToIntegration(mode: ModelAccessMode): IntegrationMode {
   if (mode === 'mock') return 'mock'
-  // proxy/direct 都走 LLM 路径；工作流仍可通过 integration.mode 单独开
+  // proxy/direct 均映射为 llm；扣子 workflow 仅作可选连通测试，不驱动主路径
   return 'llm'
 }
 
@@ -70,20 +70,23 @@ export function IntegrationProvider({ children }: { children: ReactNode }) {
   const saveConfig = useCallback(
     (next: IntegrationConfig) => {
       setConfig(next)
-      const mode: ModelAccessMode =
-        next.mode === 'mock'
-          ? 'mock'
-          : next.mode === 'llm'
-            ? appConfig.model.mode === 'proxy'
+      // mock / workflow：不改写运营后台的 model.mode（主路径只认 AppConfig）
+      // llm：写入 URL/模型，并在仍为 mock 时切到 direct 便于试跑
+      let mode = appConfig.model.mode
+      if (next.mode === 'llm') {
+        mode =
+          appConfig.model.mode === 'mock'
+            ? 'direct'
+            : appConfig.model.mode === 'proxy'
               ? 'proxy'
               : 'direct'
-            : appConfig.model.mode
+      }
 
       const merged = {
         ...appConfig,
         model: {
           ...appConfig.model,
-          mode: next.mode === 'workflow' ? appConfig.model.mode : mode,
+          mode,
           baseUrl: next.llmBaseUrl || appConfig.model.baseUrl,
           modelName: next.llmModel || appConfig.model.modelName,
           apiKey: next.apiKey,
@@ -91,13 +94,6 @@ export function IntegrationProvider({ children }: { children: ReactNode }) {
           workflowId: next.workflowId,
           workflowInputKey: next.workflowInputKey,
         },
-      }
-      // 工作流模式：保持 integration 语义，model.mode 若为 mock 则切到 direct 以便非工作流路径
-      if (next.mode === 'workflow') {
-        // 仅更新工作流字段到 appConfig，mode 保持；文案生成会优先走 workflow
-        setDraft(merged)
-        void persist(merged)
-        return
       }
       setDraft(merged)
       void persist(merged)

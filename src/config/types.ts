@@ -20,6 +20,12 @@ export interface CatalogProduct {
   category: string
   imageTone: string
   stock: number
+  /** 近月销量或销售额（导入可选，用于匹配加权） */
+  monthlySales?: number
+  /** 退货率 0～1 */
+  returnRate?: number
+  /** 毛利率 0～1 */
+  grossMargin?: number
 }
 
 export type NewsSourceKind = 'builtin' | 'rss'
@@ -45,6 +51,25 @@ export interface PromptConfig {
   rewriteInstructions: string
   /** 模型评审提示词 */
   reviewPrompt: string
+  /** 热点借势硬边界：审核 system */
+  newsGateSystemRole: string
+  /** 热点借势硬边界：user 模板 */
+  newsGateUserTemplate: string
+  /** 商品智能匹配：system */
+  productMatchSystemRole: string
+  /** 商品智能匹配：user 模板 */
+  productMatchUserTemplate: string
+}
+
+export interface ModelTemperatures {
+  /** 文案创作（偏高更有创意） */
+  creative: number
+  /** 借势硬边界审核（偏低更稳定） */
+  newsGate: number
+  /** 商品智能匹配 */
+  productMatch: number
+  /** 返工与模型评审 */
+  review: number
 }
 
 export interface ModelConfig {
@@ -54,7 +79,13 @@ export interface ModelConfig {
   modelName: string
   /** 仅存浏览器；服务端中转时密钥放服务端环境/配置 */
   apiKey: string
+  /**
+   * 兼容旧配置：等同于 temperatures.creative。
+   * 新逻辑请优先读 temperatures。
+   */
   temperature: number
+  /** 分场景温度（后台可调） */
+  temperatures: ModelTemperatures
   stream: boolean
   /** 兼容扣子工作流 */
   workflowUrl: string

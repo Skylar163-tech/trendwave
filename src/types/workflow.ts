@@ -7,6 +7,13 @@ export type PipelineStep =
 
 export type ReviewStatus = 'pending' | 'approved' | 'published'
 
+/** 借势硬边界：LLM / 规则审核结果 */
+export type NewsGateStatus =
+  | 'pending'
+  | 'clear'
+  | 'needs_review'
+  | 'error'
+
 export interface NewsItem {
   id: string
   title: string
@@ -16,6 +23,12 @@ export interface NewsItem {
   summary: string
   publishedAt: string
   tags: string[]
+  /** 借势合规审核状态 */
+  gateStatus?: NewsGateStatus
+  /** 命中的风险类别，如 政治、灾难、敏感人物 */
+  gateCategories?: string[]
+  /** 审核说明（展示给运营） */
+  gateReason?: string
 }
 
 export interface Product {

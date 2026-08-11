@@ -9,6 +9,7 @@ import {
   accessModeLabel,
   callChatModel,
   FriendlyLlmError,
+  resolveSceneTemperature,
 } from '../../services/llmClient'
 import { AdminSectionCard, FieldError, insertAtCursor } from '../shared'
 
@@ -39,9 +40,15 @@ export function PromptsPage({ draft, onChange }: Props) {
   const [trialMeta, setTrialMeta] = useState<string | null>(null)
   const [trialError, setTrialError] = useState<string | null>(null)
 
+  const [gateTrialBusy, setGateTrialBusy] = useState(false)
+  const [gateTrialResult, setGateTrialResult] = useState<string | null>(null)
+  const [gateTrialError, setGateTrialError] = useState<string | null>(null)
+  const [matchTrialBusy, setMatchTrialBusy] = useState(false)
+  const [matchTrialResult, setMatchTrialResult] = useState<string | null>(null)
+  const [matchTrialError, setMatchTrialError] = useState<string | null>(null)
+
   const sampleNews = {
-    title:
-      '巴黎奥运会闭幕，国潮运动风卷帍社交平台',
+    title: '巴黎奥运会闭幕，国潮运动风席卷社交平台',
     summary:
       '闭幕式后「国潮运动」话题破 8 亿阅读，年轻用户密集讨论「赛场同款」与「日常可穿」运动穿搭。',
     tags: ['奥运会', '国潮', '运动穿搭'],
@@ -180,10 +187,14 @@ export function PromptsPage({ draft, onChange }: Props) {
     setTrialResult(null)
     setTrialMeta(null)
     try {
-      const result = await callChatModel(draft.model, [
-        { role: 'system', content: draft.prompts.systemRole },
-        { role: 'user', content: materialPreview },
-      ])
+      const result = await callChatModel(
+        draft.model,
+        [
+          { role: 'system', content: draft.prompts.systemRole },
+          { role: 'user', content: materialPreview },
+        ],
+        { temperature: resolveSceneTemperature(draft.model, 'creative') },
+      )
       setTrialResult(result.content)
       const usage = result.usage?.totalTokens
         ? `${result.usage.totalTokens} tokens`
@@ -209,6 +220,99 @@ export function PromptsPage({ draft, onChange }: Props) {
       setTrialError(msg)
     } finally {
       setTrialBusy(false)
+    }
+  }
+
+  const gateUserText = useMemo(() => {
+    const list = [
+      {
+        id: 'demo-1',
+        title: sampleNews.title,
+        summary: sampleNews.summary,
+        tags: sampleNews.tags,
+        source: '微博热搜',
+        category: '体育/潮流',
+      },
+      {
+        id: 'demo-2',
+        title: '某公众人物卷入严重争议事件登上热搜',
+        summary: '舆论高度敏感，品牌需谨慎评估是否适合借势。',
+        tags: ['舆论', '争议'],
+        source: '社会',
+        category: '社会',
+      },
+    ]
+    return draft.prompts.newsGateUserTemplate.replace(
+      /\{\{news_list_json\}\}/g,
+      JSON.stringify(list, null, 2),
+    )
+  }, [draft.prompts.newsGateUserTemplate, sampleNews])
+
+  const matchUserText = useMemo(() => {
+    const catalog = draft.products.slice(0, 8).map((p) => ({
+      id: p.id,
+      name: p.name,
+      brand: p.brand,
+      category: p.category,
+      price: p.price,
+      sellingPoints: p.sellingPoints,
+    }))
+    return draft.prompts.productMatchUserTemplate
+      .replace(/\{\{news_title\}\}/g, sampleNews.title)
+      .replace(/\{\{news_summary\}\}/g, sampleNews.summary)
+      .replace(/\{\{news_tags\}\}/g, sampleNews.tags.join('、'))
+      .replace(/\{\{news_source\}\}/g, '微博热搜')
+      .replace(/\{\{news_category\}\}/g, '体育/潮流')
+      .replace(/\{\{catalog_json\}\}/g, JSON.stringify(catalog, null, 2))
+  }, [draft.prompts.productMatchUserTemplate, draft.products, sampleNews])
+
+  const runGateTrial = async () => {
+    setGateTrialBusy(true)
+    setGateTrialError(null)
+    setGateTrialResult(null)
+    try {
+      const result = await callChatModel(
+        draft.model,
+        [
+          { role: 'system', content: draft.prompts.newsGateSystemRole },
+          { role: 'user', content: gateUserText },
+        ],
+        { temperature: resolveSceneTemperature(draft.model, 'newsGate') },
+      )
+      setGateTrialResult(
+        `${result.mocked ? '【模拟】' : ''}延迟 ${result.latencyMs}ms\n\n${result.content}`,
+      )
+    } catch (err) {
+      setGateTrialError(
+        err instanceof Error ? err.message : '借势审核试运行失败',
+      )
+    } finally {
+      setGateTrialBusy(false)
+    }
+  }
+
+  const runMatchTrial = async () => {
+    setMatchTrialBusy(true)
+    setMatchTrialError(null)
+    setMatchTrialResult(null)
+    try {
+      const result = await callChatModel(
+        draft.model,
+        [
+          { role: 'system', content: draft.prompts.productMatchSystemRole },
+          { role: 'user', content: matchUserText },
+        ],
+        { temperature: resolveSceneTemperature(draft.model, 'productMatch') },
+      )
+      setMatchTrialResult(
+        `${result.mocked ? '【模拟】' : ''}延迟 ${result.latencyMs}ms\n\n${result.content}`,
+      )
+    } catch (err) {
+      setMatchTrialError(
+        err instanceof Error ? err.message : '商品匹配试运行失败',
+      )
+    } finally {
+      setMatchTrialBusy(false)
     }
   }
 
@@ -476,6 +580,132 @@ export function PromptsPage({ draft, onChange }: Props) {
         {trialResult && (
           <pre className="mt-3 whitespace-pre-wrap rounded-lg border border-surface-200 bg-surface-50 p-3 text-sm">
             {trialResult}
+          </pre>
+        )}
+      </AdminSectionCard>
+
+      <AdminSectionCard
+        id="news-gate"
+        title="借势硬边界审核"
+        description="新闻抓取后批量审核是否适合品牌借势；命中风险的新闻会标注「需人工审核」"
+        actions={
+          <button
+            type="button"
+            className="text-xs font-semibold text-brand-600"
+            onClick={() =>
+              patchPrompts({
+                newsGateSystemRole: DEFAULT_PROMPTS.newsGateSystemRole,
+                newsGateUserTemplate: DEFAULT_PROMPTS.newsGateUserTemplate,
+              })
+            }
+          >
+            恢复默认
+          </button>
+        }
+      >
+        <label className="mb-3 block text-sm font-medium">
+          System（审核角色）
+          <textarea
+            value={draft.prompts.newsGateSystemRole}
+            onChange={(e) =>
+              patchPrompts({ newsGateSystemRole: e.target.value })
+            }
+            rows={10}
+            className="mt-1 w-full rounded-lg border border-surface-300 p-2 font-mono text-[13px] leading-relaxed"
+          />
+        </label>
+        <label className="mb-3 block text-sm font-medium">
+          User 模板（可用 {'{{news_list_json}}'}）
+          <textarea
+            value={draft.prompts.newsGateUserTemplate}
+            onChange={(e) =>
+              patchPrompts({ newsGateUserTemplate: e.target.value })
+            }
+            rows={5}
+            className="mt-1 w-full rounded-lg border border-surface-300 p-2 font-mono text-[13px]"
+          />
+        </label>
+        <PreviewBlock title="预览（user）" text={gateUserText} />
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={gateTrialBusy}
+            onClick={() => void runGateTrial()}
+            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {gateTrialBusy ? '试运行中…' : '试运行审核'}
+          </button>
+          {draft.model.mode === 'mock' && (
+            <span className="text-xs text-amber-700">
+              mock 模式下工作台走关键词规则；此处试运行仍可看模型拼装效果
+            </span>
+          )}
+        </div>
+        {gateTrialError && <FieldError message={gateTrialError} />}
+        {gateTrialResult && (
+          <pre className="mt-3 whitespace-pre-wrap rounded-lg border border-surface-200 bg-surface-50 p-3 text-sm">
+            {gateTrialResult}
+          </pre>
+        )}
+      </AdminSectionCard>
+
+      <AdminSectionCard
+        id="product-match"
+        title="商品智能匹配"
+        description="建议匹配步：按热点从商品库挑选商品；可在此改提示词并试运行验证 JSON"
+        actions={
+          <button
+            type="button"
+            className="text-xs font-semibold text-brand-600"
+            onClick={() =>
+              patchPrompts({
+                productMatchSystemRole: DEFAULT_PROMPTS.productMatchSystemRole,
+                productMatchUserTemplate:
+                  DEFAULT_PROMPTS.productMatchUserTemplate,
+              })
+            }
+          >
+            恢复默认
+          </button>
+        }
+      >
+        <label className="mb-3 block text-sm font-medium">
+          System（选品角色）
+          <textarea
+            value={draft.prompts.productMatchSystemRole}
+            onChange={(e) =>
+              patchPrompts({ productMatchSystemRole: e.target.value })
+            }
+            rows={8}
+            className="mt-1 w-full rounded-lg border border-surface-300 p-2 font-mono text-[13px] leading-relaxed"
+          />
+        </label>
+        <label className="mb-3 block text-sm font-medium">
+          User 模板（{'{{news_*}}'} / {'{{catalog_json}}'}）
+          <textarea
+            value={draft.prompts.productMatchUserTemplate}
+            onChange={(e) =>
+              patchPrompts({ productMatchUserTemplate: e.target.value })
+            }
+            rows={10}
+            className="mt-1 w-full rounded-lg border border-surface-300 p-2 font-mono text-[13px]"
+          />
+        </label>
+        <PreviewBlock title="预览（user）" text={matchUserText} />
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={matchTrialBusy}
+            onClick={() => void runMatchTrial()}
+            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {matchTrialBusy ? '试运行中…' : '试运行匹配'}
+          </button>
+        </div>
+        {matchTrialError && <FieldError message={matchTrialError} />}
+        {matchTrialResult && (
+          <pre className="mt-3 whitespace-pre-wrap rounded-lg border border-surface-200 bg-surface-50 p-3 text-sm">
+            {matchTrialResult}
           </pre>
         )}
       </AdminSectionCard>

@@ -5,6 +5,7 @@ import type {
   EvalCase,
   EvalSettings,
   ModelConfig,
+  ModelTemperatures,
   NewsSourceConfig,
   PromptConfig,
 } from './types'
@@ -50,12 +51,58 @@ const DEFAULT_REVIEW_PROMPT = `你是微博营销文案评审。请对文案打�
 {"relevance":1-5,"fidelity":1-5,"appeal":1-5,"naturalness":1-5,"comment":"一句点评"}
 维度：热点关联度、素材还原度、传播吸引力、语气自然度。`
 
+const DEFAULT_NEWS_GATE_SYSTEM = `你是电商营销合规审核员，判断热点是否适合品牌「借势种草」。
+
+必须标记为需人工审核（needs_review）的情况包括但不限于：
+- 政治、政策、国际关系、选举、军事、恐怖袭击
+- 灾难伤亡、重大事故、疫情恐慌、群体性事件
+- 名人丑闻/犯罪/自杀等易引发舆论翻车的话题
+- 宗教冲突、民族对立、歧视仇恨、色情赌博
+- 未证实谣言、极易引发品牌道德绑架的争议
+
+可放行（clear）的一般消费/文体/科技/生活潮流热点。
+
+只输出 JSON（不要 markdown），格式：
+{"results":[{"id":"新闻id","status":"clear|needs_review","categories":["政治"],"reason":"一句话说明"}]}
+categories 在 clear 时可为空数组；reason 始终用中文。`
+
+const DEFAULT_NEWS_GATE_USER = `请审核下列热点是否适合电商借势营销：
+
+{{news_list_json}}`
+
+const DEFAULT_PRODUCT_MATCH_SYSTEM = `你是电商选品专家。根据热点内容，从给定商品库中选出最适合借势种草的商品。
+
+规则：
+1. 只允许从商品库的 id 中选择，禁止编造 id。
+2. 优先语义相关（标题/摘要/标签与品类、卖点相关）；相关度接近时，优先毛利率更高、退货率更低、近月销量更好的商品。
+3. 按综合相关度排序，最多返回 6 个；都不合适则返回空数组。
+4. score 为 0～100 的整数；reason 用一句中文说明匹配逻辑（可点出经营指标）。
+
+只输出 JSON（不要 markdown）：
+{"matches":[{"productId":"p1","score":88,"reason":"与热点场景相关，毛利与销量表现较好"}]}`
+
+const DEFAULT_PRODUCT_MATCH_USER = `【热点】
+标题：{{news_title}}
+摘要：{{news_summary}}
+标签：{{news_tags}}
+来源：{{news_source}}
+品类：{{news_category}}
+
+【商品库】
+{{catalog_json}}
+
+请返回匹配结果 JSON。`
+
 export const DEFAULT_PROMPTS: PromptConfig = {
   systemRole: DEFAULT_SYSTEM_ROLE,
   materialTemplate: DEFAULT_MATERIAL_TEMPLATE,
   productItemFormat: DEFAULT_PRODUCT_ITEM_FORMAT,
   rewriteInstructions: DEFAULT_REWRITE_INSTRUCTIONS,
   reviewPrompt: DEFAULT_REVIEW_PROMPT,
+  newsGateSystemRole: DEFAULT_NEWS_GATE_SYSTEM,
+  newsGateUserTemplate: DEFAULT_NEWS_GATE_USER,
+  productMatchSystemRole: DEFAULT_PRODUCT_MATCH_SYSTEM,
+  productMatchUserTemplate: DEFAULT_PRODUCT_MATCH_USER,
 }
 
 export const DEFAULT_CREATIVE_STYLES: CreativeStyle[] = [
@@ -84,13 +131,21 @@ export const DEFAULT_TONE_PRESETS = [
   '种草种心',
 ]
 
+export const DEFAULT_MODEL_TEMPERATURES: ModelTemperatures = {
+  creative: 0.8,
+  newsGate: 0.1,
+  productMatch: 0.2,
+  review: 0.2,
+}
+
 export const DEFAULT_MODEL: ModelConfig = {
   mode: 'mock',
   provider: 'deepseek',
   baseUrl: 'https://api.deepseek.com',
   modelName: 'deepseek-chat',
   apiKey: '',
-  temperature: 0.8,
+  temperature: DEFAULT_MODEL_TEMPERATURES.creative,
+  temperatures: { ...DEFAULT_MODEL_TEMPERATURES },
   stream: false,
   workflowUrl: '',
   workflowId: '',
@@ -287,6 +342,18 @@ export const PLACEHOLDERS: { key: string; label: string; hint: string }[] = [
   { key: 'news_title', label: '热点标题', hint: '当前热点的标题' },
   { key: 'news_summary', label: '热点摘要', hint: '热点摘要文案' },
   { key: 'news_tags', label: '话题标签', hint: '用顿号拼接的标签' },
+  { key: 'news_source', label: '热点来源', hint: '信源名称' },
+  { key: 'news_category', label: '热点品类', hint: '热点分类' },
+  {
+    key: 'news_list_json',
+    label: '热点列表 JSON',
+    hint: '借势审核：批量新闻数组',
+  },
+  {
+    key: 'catalog_json',
+    label: '商品库 JSON',
+    hint: '智能匹配：精简商品库',
+  },
   { key: 'tone', label: '主打语调', hint: '运营选择的语调' },
   { key: 'style_name', label: '风格名称', hint: '当前创作风格名' },
   {

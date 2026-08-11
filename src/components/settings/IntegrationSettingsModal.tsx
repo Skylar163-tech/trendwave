@@ -14,18 +14,18 @@ const MODE_OPTIONS: { value: IntegrationMode; label: string; hint: string }[] =
   [
     {
       value: 'mock',
-      label: '本地模拟',
-      hint: '不调用外部接口，适合演示',
-    },
-    {
-      value: 'workflow',
-      label: '扣子工作流',
-      hint: '方案 A：立即抓取一次跑完「新闻→匹配→文案」',
+      label: '跟随运营后台',
+      hint: '工作台主路径由后台「模型 / 提示词」控制（推荐）',
     },
     {
       value: 'llm',
-      label: 'LLM API（暂不使用）',
-      hint: 'DeepSeek 已在扣子工作流内调用时可忽略',
+      label: '同步 LLM 字段',
+      hint: '把下方 Base URL / 模型写入运营后台模型配置',
+    },
+    {
+      value: 'workflow',
+      label: '扣子（可选连通测试）',
+      hint: '不挡主路径；仅在本页「测试调用」验证扣子，工作台不走工作流',
     },
   ]
 
@@ -176,7 +176,7 @@ export function IntegrationSettingsModal() {
               集成配置
             </h2>
             <p className="mt-0.5 text-xs text-surface-700/65">
-              扣子令牌仅保存在本机浏览器，不会写入代码仓库。
+              工作台主路径请用运营后台配置提示词与模型；本页扣子仅作可选测试。
             </p>
           </div>
           <button
@@ -189,11 +189,25 @@ export function IntegrationSettingsModal() {
         </div>
 
         <div className="scrollbar-thin space-y-4 overflow-y-auto px-5 py-4">
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-900">
-            <strong>安全提示：</strong>
-            请使用扣子「个人访问令牌」（一般以 <code>pat_</code>{' '}
-            开头）。DeepSeek Key 配在扣子工作流节点内即可，无需在本页 LLM
-            再填一遍。
+          <div className="rounded-xl border border-brand-200 bg-brand-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-brand-900">
+            <strong>主路径：</strong>
+            验证提示词效果请到{' '}
+            <a
+              href="#/admin/prompts"
+              className="font-semibold underline-offset-2 hover:underline"
+              onClick={closeSettings}
+            >
+              运营后台 · 提示词
+            </a>
+            {' / '}
+            <a
+              href="#/admin/model"
+              className="font-semibold underline-offset-2 hover:underline"
+              onClick={closeSettings}
+            >
+              模型
+            </a>
+            （mock / 中转 / 直连）。扣子工作流不会拦截工作台抓取与生成。
           </div>
 
           <fieldset className="space-y-2">
@@ -233,11 +247,10 @@ export function IntegrationSettingsModal() {
 
           {draft.mode === 'workflow' && (
             <div className="space-y-3">
-              <div className="rounded-xl border border-brand-200 bg-brand-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-brand-900">
-                <p className="font-semibold">方案 A · 全流程灌入</p>
-                <p className="mt-1 text-brand-900/80">
-                  「立即抓取」会调用本工作流，并把返回结果写入新闻 / 商品 / 文案步骤。结束节点请尽量输出如下
-                  JSON（也可包在 output 字符串里）：
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-900">
+                <p className="font-semibold">可选 · 扣子连通测试</p>
+                <p className="mt-1 text-amber-900/80">
+                  工作台「立即抓取 / 生成文案」已改为走运营后台信源与模型，不会调用下方工作流。此处仅用于验证扣子返回是否符合约定 JSON：
                 </p>
                 <pre className="mt-2 max-h-36 overflow-auto rounded-lg bg-white/80 p-2 font-mono text-[10px] text-surface-800">
                   {PIPELINE_OUTPUT_CONTRACT}
@@ -291,7 +304,8 @@ export function IntegrationSettingsModal() {
           {draft.mode === 'llm' && (
             <div className="space-y-3">
               <div className="rounded-xl border border-surface-200 bg-surface-50 px-3 py-2 text-[11px] text-surface-700/70">
-                当前推荐只用「扣子工作流」。若 DeepSeek 已在工作流内配置，此处可留空。
+                推荐直接在运营后台「模型」页配置；此处填写并保存会同步到同一份
+                AppConfig。
               </div>
               <Field label="LLM Base URL" hint="OpenAI 兼容，无需末尾斜杠">
                 <input

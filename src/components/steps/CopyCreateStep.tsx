@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useWorkflow } from '../../context/WorkflowContext'
-import { useIntegration } from '../../context/IntegrationContext'
+import { useAppConfig } from '../../context/AppConfigContext'
+import { accessModeLabel } from '../../services/llmClient'
 
 export function CopyCreateStep() {
   const {
@@ -20,7 +21,7 @@ export function CopyCreateStep() {
     selectedTone,
     setSelectedTone,
   } = useWorkflow()
-  const { config, isReady, openSettings } = useIntegration()
+  const { config: appConfig } = useAppConfig()
   const [copied, setCopied] = useState(false)
 
   if (!selectedNews || !selectedProduct) {
@@ -45,16 +46,24 @@ export function CopyCreateStep() {
     setTimeout(() => setCopied(false), 1600)
   }
 
+  const modelMode = appConfig.model.mode
   const sourceHint =
-    copyVariants.length && copySource === 'workflow'
-      ? '已灌入全流程预生成文案，可直接微调或重新生成'
-      : config.mode === 'mock'
-        ? '当前为本地模拟'
-        : !isReady
-          ? '集成配置不完整，将回退模拟'
-          : config.mode === 'workflow'
-            ? '可调用工作流接口生成文案'
-            : '将调用 LLM API'
+    modelMode === 'mock'
+      ? '当前为本地模拟（运营后台「模型」可切换真实调用）'
+      : `将使用运营后台提示词 · ${accessModeLabel(modelMode)}`
+
+  const sourceLabel =
+    copySource === 'mock'
+      ? '本地模拟'
+      : copySource === 'proxy'
+        ? '服务端中转'
+        : copySource === 'direct'
+          ? '浏览器直连'
+          : copySource === 'llm'
+            ? 'LLM API'
+            : copySource === 'workflow'
+              ? '工作流（遗留）'
+              : null
 
   return (
     <div className="animate-fade-up space-y-4">
@@ -64,14 +73,13 @@ export function CopyCreateStep() {
             创作文案
           </h2>
           <p className="mt-1 text-sm text-surface-700/65">
-            基于「热点 + 商品」组合生成微博风格营销文案。
-            <button
-              type="button"
-              onClick={openSettings}
+            基于「热点 + 商品」与运营后台提示词 / 创作风格生成文案。
+            <a
+              href="#/admin/prompts"
               className="ml-1 font-medium text-brand-600 underline-offset-2 hover:underline"
             >
-              配置入口
-            </button>
+              编辑提示词
+            </a>
             <span className="ml-1 text-surface-700/45">· {sourceHint}</span>
           </p>
         </div>
@@ -128,14 +136,9 @@ export function CopyCreateStep() {
         </div>
       )}
 
-      {copySource && !isGenerating && (
+      {sourceLabel && !isGenerating && (
         <div className="text-[11px] text-surface-700/55">
-          来源：
-          {copySource === 'mock'
-            ? '本地模拟'
-            : copySource === 'workflow'
-              ? '工作流'
-              : 'LLM API'}
+          来源：{sourceLabel}
         </div>
       )}
 
@@ -143,14 +146,14 @@ export function CopyCreateStep() {
         <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-xl border border-brand-200 bg-brand-50/40">
           <span className="h-8 w-8 animate-spin-slow rounded-full border-[3px] border-brand-200 border-t-brand-500" />
           <p className="text-sm font-medium text-brand-700">
-            {config.mode === 'mock' || !isReady
+            {modelMode === 'mock'
               ? '正在生成模拟文案…'
-              : '正在请求外部模型 / 工作流…'}
+              : '正在按运营提示词请求模型…'}
           </p>
           <p className="text-xs text-brand-600/70">
-            {config.mode === 'mock' || !isReady
-              ? '预计约 1.5 秒（Demo 模拟）'
-              : '耗时取决于外部接口响应'}
+            {modelMode === 'mock'
+              ? '预计约 1 秒（本地模拟）'
+              : `通道：${accessModeLabel(modelMode)}`}
           </p>
         </div>
       )}
@@ -158,7 +161,7 @@ export function CopyCreateStep() {
       {!isGenerating && copyVariants.length === 0 && (
         <div className="flex min-h-[200px] flex-col items-center justify-center rounded-xl border border-dashed border-surface-300 bg-white/50">
           <p className="text-sm text-surface-700/65">
-            点击「生成文案」获取 3 个微博营销版本
+            点击「生成文案」获取多风格营销版本
           </p>
         </div>
       )}

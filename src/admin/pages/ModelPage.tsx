@@ -1,6 +1,9 @@
 import { useState } from 'react'
-import type { AppConfig, ModelAccessMode } from '../../config/types'
-import { PROVIDER_PRESETS } from '../../config/defaults'
+import type { AppConfig, ModelAccessMode, ModelTemperatures } from '../../config/types'
+import {
+  DEFAULT_MODEL_TEMPERATURES,
+  PROVIDER_PRESETS,
+} from '../../config/defaults'
 import {
   accessModeLabel,
   FriendlyLlmError,
@@ -31,13 +34,65 @@ const MODES: { value: ModelAccessMode; label: string; hint: string }[] = [
   },
 ]
 
+const TEMP_FIELDS: {
+  key: keyof ModelTemperatures
+  label: string
+  hint: string
+}[] = [
+  {
+    key: 'creative',
+    label: '文案创作',
+    hint: '工作台生成微博文案；建议 0.7～1.0',
+  },
+  {
+    key: 'newsGate',
+    label: '借势硬边界审核',
+    hint: '新闻抓取后的合规判断；建议 0.1～0.3',
+  },
+  {
+    key: 'productMatch',
+    label: '商品智能匹配',
+    hint: '建议匹配商品；建议 0.1～0.3',
+  },
+  {
+    key: 'review',
+    label: '返工与模型评审',
+    hint: '机审失败后的改写、打分；建议 0.1～0.3',
+  },
+]
+
 export function ModelPage({ draft, onChange }: Props) {
   const [testing, setTesting] = useState(false)
   const [testMsg, setTestMsg] = useState<string | null>(null)
   const [testOk, setTestOk] = useState<boolean | null>(null)
 
+  const temps: ModelTemperatures = {
+    ...DEFAULT_MODEL_TEMPERATURES,
+    ...draft.model.temperatures,
+    creative:
+      draft.model.temperatures?.creative ??
+      draft.model.temperature ??
+      DEFAULT_MODEL_TEMPERATURES.creative,
+  }
+
   const patch = (partial: Partial<AppConfig['model']>) => {
     onChange({ ...draft, model: { ...draft.model, ...partial } })
+  }
+
+  const patchTemp = (key: keyof ModelTemperatures, value: number) => {
+    const next = { ...temps, [key]: value }
+    patch({
+      temperatures: next,
+      // 兼容旧字段：创作温度同步到 temperature
+      temperature: next.creative,
+    })
+  }
+
+  const restoreDefaultTemps = () => {
+    patch({
+      temperatures: { ...DEFAULT_MODEL_TEMPERATURES },
+      temperature: DEFAULT_MODEL_TEMPERATURES.creative,
+    })
   }
 
   const applyProvider = (provider: string) => {
@@ -165,31 +220,49 @@ export function ModelPage({ draft, onChange }: Props) {
 
       <AdminSectionCard
         id="params"
-        title="温度与流式"
-        description="控制随机性/创造性/是否流式输出"
+        title="分场景温度"
+        description="各 LLM 调用独立温度；创作偏高更有创意，审核/匹配/评审偏低更稳定"
+        actions={
+          <button
+            type="button"
+            className="text-xs font-semibold text-brand-600"
+            onClick={restoreDefaultTemps}
+          >
+            恢复默认温度
+          </button>
+        }
       >
-        <label className="block text-sm">
-          温度：{draft.model.temperature.toFixed(1)}
-          <input
-            type="range"
-            min={0}
-            max={1.5}
-            step={0.1}
-            value={draft.model.temperature}
-            onChange={(e) => patch({ temperature: Number(e.target.value) })}
-            className="mt-2 w-full"
-          />
-          <p className="mt-1 text-xs text-surface-700/65">
-            创作类建议 0.7～1.0；事实/摘要 0.1～0.3；评测对比 0.1～0.3
-          </p>
-        </label>
-        <label className="mt-4 flex items-center gap-2 text-sm">
+        <div className="space-y-5">
+          {TEMP_FIELDS.map((f) => (
+            <label key={f.key} className="block text-sm">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-medium text-surface-900">
+                  {f.label}
+                  <span className="ml-2 font-mono text-brand-700">
+                    {temps[f.key].toFixed(1)}
+                  </span>
+                </span>
+                <span className="text-[11px] text-surface-700/55">{f.hint}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1.5}
+                step={0.1}
+                value={temps[f.key]}
+                onChange={(e) => patchTemp(f.key, Number(e.target.value))}
+                className="mt-2 w-full"
+              />
+            </label>
+          ))}
+        </div>
+        <label className="mt-5 flex items-center gap-2 border-t border-surface-100 pt-4 text-sm">
           <input
             type="checkbox"
             checked={draft.model.stream}
             onChange={(e) => patch({ stream: e.target.checked })}
           />
-          启用流式输出（部分服务商或代理不支持）
+          启用流式输出（部分服务商或代理不支持；当前主路径仍以非流式为主）
         </label>
       </AdminSectionCard>
 

@@ -2,7 +2,7 @@ import { useWorkflow } from '../../context/WorkflowContext'
 import { ContextBar } from '../shared/ContextBar'
 import { NewsFetchStep } from '../steps/NewsFetchStep'
 import { SuggestMatchStep } from '../steps/SuggestMatchStep'
-import { MatchProductStep } from '../steps/MatchProductStep'
+import { ConfirmMatchStep } from '../steps/ConfirmMatchStep'
 import { CopyCreateStep } from '../steps/CopyCreateStep'
 import { ReviewPublishStep } from '../steps/ReviewPublishStep'
 
@@ -20,7 +20,7 @@ export function MainWorkspace() {
         <ContextBar />
         {step === 'news' && <NewsFetchStep />}
         {step === 'suggest' && <SuggestMatchStep />}
-        {step === 'match' && <MatchProductStep />}
+        {step === 'match' && <ConfirmMatchStep />}
         {step === 'copy' && <CopyCreateStep />}
         {step === 'review' && <ReviewPublishStep />}
       </div>

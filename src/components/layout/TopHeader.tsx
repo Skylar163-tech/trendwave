@@ -2,17 +2,14 @@ import { CURRENT_USER } from '../../data/mock'
 import { useIntegration } from '../../context/IntegrationContext'
 import { useAppConfig } from '../../context/AppConfigContext'
 import { maskSecret } from '../../types/integration'
+import { accessModeLabel } from '../../services/llmClient'
 import { SourceBadge } from '../../admin/shared'
 
 export function TopHeader() {
-  const { openSettings, config, isReady } = useIntegration()
-  const { source } = useAppConfig()
-  const modeLabel =
-    config.mode === 'mock'
-      ? '模拟模式'
-      : config.mode === 'workflow'
-        ? '工作流'
-        : 'LLM API'
+  const { openSettings, config } = useIntegration()
+  const { source, config: appConfig } = useAppConfig()
+  const modeLabel = accessModeLabel(appConfig.model.mode)
+  const isMock = appConfig.model.mode === 'mock'
 
   return (
     <header className="panel sticky top-0 z-30 flex h-14 items-center justify-between border-b border-surface-200/80 px-5 shadow-[0_1px_0_rgba(255,255,255,0.6)]">
@@ -66,15 +63,12 @@ export function TopHeader() {
           <span
             className={[
               'rounded-md px-1.5 py-0.5 text-[10px] font-semibold',
-              config.mode === 'mock'
+              isMock
                 ? 'bg-surface-100 text-surface-700'
-                : isReady
-                  ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-amber-100 text-amber-700',
+                : 'bg-emerald-100 text-emerald-700',
             ].join(' ')}
           >
             {modeLabel}
-            {config.mode !== 'mock' && !isReady ? ' · 待完善' : ''}
           </span>
         </button>
 

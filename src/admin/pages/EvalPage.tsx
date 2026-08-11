@@ -12,7 +12,7 @@ import {
   type ReviewScores,
 } from '../../services/copyReview'
 import { buildMaterialPrompt } from '../../services/promptEngine'
-import { callChatModel } from '../../services/llmClient'
+import { callChatModel, resolveSceneTemperature } from '../../services/llmClient'
 import { AdminSectionCard } from '../shared'
 
 interface Props {
@@ -214,10 +214,16 @@ export function EvalPage({ draft, onChange }: Props) {
             let copy = ''
             let tokens = 0
             try {
-              const result = await callChatModel(draft.model, [
-                { role: 'system', content: draft.prompts.systemRole },
-                { role: 'user', content: user },
-              ])
+              const result = await callChatModel(
+                draft.model,
+                [
+                  { role: 'system', content: draft.prompts.systemRole },
+                  { role: 'user', content: user },
+                ],
+                {
+                  temperature: resolveSceneTemperature(draft.model, 'creative'),
+                },
+              )
               copy = result.content
               tokens = result.usage?.totalTokens ?? 0
             } catch (err) {

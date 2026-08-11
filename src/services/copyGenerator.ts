@@ -5,6 +5,7 @@ import {
   accessModeLabel,
   callChatModel,
   FriendlyLlmError,
+  resolveSceneTemperature,
 } from './llmClient'
 import { runCozeWorkflow } from './cozeWorkflow'
 import type { IntegrationConfig } from '../types/integration'
@@ -42,16 +43,28 @@ function toCatalog(product: Product): CatalogProduct {
 export async function generateWeiboCopy(
   news: NewsItem,
   product: Product,
-  integration: IntegrationConfig,
+  integration: IntegrationConfig | null | undefined,
   appConfig?: AppConfig,
   opts?: { tone?: string; enableRework?: boolean },
 ): Promise<GenerateCopyResult> {
   const tone = opts?.tone ?? '热点借势'
   const enableRework = opts?.enableRework ?? true
 
-  // 无 AppConfig 时回退旧逻辑
+  // 无 AppConfig 时回退旧逻辑（兼容）；主路径始终带 AppConfig
   if (!appConfig) {
-    return legacyGenerate(news, product, integration)
+    return legacyGenerate(
+      news,
+      product,
+      integration ?? {
+        mode: 'mock',
+        workflowUrl: '',
+        workflowId: '',
+        workflowInputKey: 'input',
+        llmBaseUrl: '',
+        llmModel: '',
+        apiKey: '',
+      },
+    )
   }
 
   const styles =
@@ -65,33 +78,8 @@ export async function generateWeiboCopy(
           } satisfies CreativeStyle,
         ]
 
-  // 兼容：若仍选工作流模式且 integration 就绪，走扣子
-  if (integration.mode === 'workflow' && isIntegrationReady(integration)) {
-    try {
-      const { texts } = await runCozeWorkflow(news, product, integration)
-      return {
-        variants: styles.map((s, i) => ({
-          id: `wf-${i + 1}`,
-          label: `版本 ${String.fromCharCode(65 + i)} · ${s.name}`,
-          tone: s.name,
-          content: texts[i]?.trim() || texts[0]?.trim() || fallbackLine(news, product),
-        })),
-        source: 'workflow',
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '工作流失败'
-      // 继续尝试模型配置
-      if (appConfig.model.mode === 'mock') {
-        return {
-          variants: await buildMockFromStyles(news, product, styles, tone),
-          source: 'mock',
-          warning: `${message}，已回退模拟`,
-        }
-      }
-    }
-  }
-
-  if (appConfig.model.mode === 'mock' || integration.mode === 'mock') {
+  // 主路径：运营后台 AppConfig（提示词 + 模型），不经扣子工作流
+  if (appConfig.model.mode === 'mock') {
     return {
       variants: await buildMockFromStyles(news, product, styles, tone),
       source: 'mock',
@@ -117,10 +105,14 @@ export async function generateWeiboCopy(
     })
 
     try {
-      const result = await callChatModel(appConfig.model, [
-        { role: 'system', content: appConfig.prompts.systemRole },
-        { role: 'user', content: user },
-      ])
+      const result = await callChatModel(
+        appConfig.model,
+        [
+          { role: 'system', content: appConfig.prompts.systemRole },
+          { role: 'user', content: user },
+        ],
+        { temperature: resolveSceneTemperature(appConfig.model, 'creative') },
+      )
       lastSource = result.mode
       let content = result.content.trim()
 
@@ -230,6 +222,12 @@ async function legacyGenerate(
         modelName: config.llmModel,
         apiKey: config.apiKey,
         temperature: 0.8,
+        temperatures: {
+          creative: 0.8,
+          newsGate: 0.1,
+          productMatch: 0.2,
+          review: 0.2,
+        },
         stream: false,
         workflowUrl: config.workflowUrl,
         workflowId: config.workflowId,
@@ -242,6 +240,7 @@ async function legacyGenerate(
           content: `热点：${news.title}\n商品：${product.brand} ${product.name}\n请生成 1 条微博文案`,
         },
       ],
+      { temperature: 0.8 },
     )
     return {
       variants: [
